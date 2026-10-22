@@ -1,4 +1,5 @@
-node_modules/
+dist/
 .ensemble/
+*.test
 *.log
 .DS_Store

@@ -27,7 +27,16 @@ header { display: flex; align-items: center; gap: 16px; padding: 18px 28px; bord
 .chip { display: flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; background: var(--panel); cursor: default; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .chip.ready .dot { background: var(--good); }
-.chip.missing { opacity: .6; }
+.chip.missing { opacity: .7; cursor: pointer; }
+.chip.missing:hover { opacity: 1; border-color: var(--ink); }
+.dirrow { display: flex; gap: 8px; }
+.dirrow input { flex: 1; min-width: 0; }
+.dirrow button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 9px; padding: 0 14px; font: inherit; font-size: 13.5px; cursor: pointer; white-space: nowrap; }
+.setup-step { margin: 12px 0 0; }
+.setup-step b { display: block; font-size: 13px; margin-bottom: 5px; }
+.cmdline { display: flex; gap: 6px; align-items: stretch; }
+.cmdline code { flex: 1; font: 12.5px/1.5 var(--mono); background: var(--soft); padding: 8px 10px; border-radius: 8px; white-space: normal; word-break: break-all; user-select: all; }
+.cmdline button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 0 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
 .chip.missing .dot { background: var(--bad); }
 .chip.needs-key { cursor: pointer; border-style: dashed; }
 .chip.needs-key .dot { background: var(--warn); }
@@ -122,7 +131,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
       <form id="build" hidden>
         <p class="hint">One model plans, another builds, a third reviews, and fixes loop until it's approved. Work lands on a new git branch in your project.</p>
         <label for="dir">Project folder on this computer</label>
-        <input type="text" id="dir" list="recent" placeholder="C:\Users\you\Projects\my-app" autocomplete="off">
+        <div class="dirrow"><input type="text" id="dir" list="recent" placeholder="C:\Users\you\Projects\my-app" autocomplete="off"><button type="button" id="browse" hidden>Browse…</button></div>
         <datalist id="recent"></datalist>
         <label for="task">What should they build or change?</label>
         <textarea id="task" placeholder="e.g. Add CSV export of shifts with date-range filtering, and tests for it."></textarea>
@@ -156,6 +165,14 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
     <div id="run" hidden></div>
   </section>
 </main>
+<dialog id="setupdlg"><form method="dialog">
+  <h3 id="setup-title">Set up</h3>
+  <p id="setup-sub"></p>
+  <div class="setup-step"><b>1. Install</b><div class="cmdline"><code id="setup-install"></code><button type="button" data-copy="setup-install">Copy</button></div></div>
+  <div class="setup-step"><b>2. Sign in</b><p id="setup-login" style="margin:0;color:var(--ink)"></p></div>
+  <p style="margin-top:14px">Paste the install line into <b>PowerShell</b> (Start menu → type “PowerShell”), then come back and press Re-check.</p>
+  <div class="btns"><button value="close">Close</button><button class="primary" value="recheck" id="setup-recheck">Re-check</button></div>
+</form></dialog>
 <dialog id="keydlg"><form method="dialog" id="keyform">
   <h3 id="key-title">Add API key</h3>
   <p id="key-help"></p>
@@ -238,6 +255,7 @@ async function loadAgents(refresh) {
   document.querySelectorAll('.chip').forEach((ch) => {
     const a = agents.find((x) => x.id === ch.dataset.id);
     if (a?.keyName && (a.status === 'needs-key' || a.status === 'ready')) { ch.style.cursor = 'pointer'; ch.onclick = () => openKey(a); }
+    else if (a?.status === 'missing') ch.onclick = () => openSetup(a);
   });
   const px = agents.find((a) => a.id === 'perplexity');
   const pxReady = px?.status === 'ready';
@@ -252,9 +270,33 @@ async function loadAgents(refresh) {
     sel.innerHTML = pool.map((a) => `<option value="${a.id}" ${a.id === want ? 'selected' : ''}>${esc(a.label)}</option>`).join('') || '<option value="">No ready model</option>';
   });
   $('#recent').innerHTML = (j.recent || []).map((d) => `<option value="${esc(d)}">`).join('');
-  if (!ready.length) $('#council-err').textContent = $('#build-err').textContent = 'No AI tools are ready yet. Hover a red chip to see how to install and sign in, then press Re-check.';
+  $('#browse').hidden = !j.canPick;
+  if (!ready.length) $('#council-err').textContent = $('#build-err').textContent = 'No AIs are ready yet. Click a red or yellow chip at the top to set it up.';
 }
 $('#recheck').onclick = () => loadAgents(true).catch(alert);
+
+function openSetup(a) {
+  $('#setup-title').textContent = `Set up ${a.label}`;
+  $('#setup-sub').textContent = `Uses your ${a.membership} membership.${a.detail && a.detail !== 'not installed' ? ` Last check said: ${a.detail}` : ''}`;
+  $('#setup-install').textContent = (a.install || '').replace(/^PowerShell:\s*/, '');
+  $('#setup-login').textContent = a.login || '';
+  $('#setupdlg').showModal();
+}
+document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = () => {
+  navigator.clipboard.writeText($('#' + b.dataset.copy).textContent);
+  b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+});
+$('#setupdlg').addEventListener('close', () => { if ($('#setupdlg').returnValue === 'recheck') loadAgents(true).catch(alert); });
+$('#browse').onclick = async () => {
+  try { const j = await api('/api/pick-folder', {}); if (j.dir) $('#dir').value = j.dir; }
+  catch (err) { $('#build-err').textContent = err.message; }
+};
+// Links open in the normal web browser, not inside the app window.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="http"]');
+  if (a && window.ensembleOpenExternal) { e.preventDefault(); window.ensembleOpenExternal(a.href); }
+});
+setInterval(() => { fetch('/api/ping', { headers: { 'X-Ensemble-Token': TOKEN } }).catch(() => {}); }, 30000);
 
 let keyAgent = null;
 function openKey(a) {
@@ -365,7 +407,7 @@ function renderHistory() {
   document.querySelectorAll('#history a').forEach((a) => a.onclick = () => watch(history.find((h) => h.id === a.dataset.id)));
 }
 
-if (!TOKEN) document.body.innerHTML = '<p style="padding:40px">Open Ensemble using the link printed in the terminal (it includes a security token).</p>';
+if (!TOKEN) document.body.innerHTML = '<p style="padding:40px">Open Ensemble from its app icon, or use the link printed in the terminal (it includes a security token).</p>';
 else loadAgents().catch((e) => { $('#council-err').textContent = e.message; });
 </script>
 </body>
