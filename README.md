@@ -19,6 +19,24 @@ It's a single 7 MB program. **No Node.js, Python or other runtime needed.** It o
 
 For **Build**, you also need [git](https://git-scm.com/download/win).
 
+## Use it from your phone
+
+Your phone becomes a remote for your PC: the AIs still run on the PC (that's where your memberships are signed in), and from your phone you start councils and builds, watch them live, and read the results, from anywhere.
+
+It goes over [Tailscale](https://tailscale.com), a free private network between your own devices. Nothing is opened to the internet.
+
+1. Install Tailscale on your PC and your Android phone, and sign in to the same account on both.
+2. In Ensemble on the PC, click **Phone** → **Turn on**, then scan the QR code with your phone.
+3. In Chrome's ⋮ menu, tap **Add to Home screen** → **Install**. Ensemble now opens full-screen from its own icon.
+
+For the full-screen app, Tailscale needs **HTTPS** turned on for your account (one switch in the Tailscale admin console; Ensemble shows a button for it if it's off). Without it, phone access still works over plain HTTP inside Tailscale, but the phone can only add a browser shortcut.
+
+Good to know:
+- Ensemble must be open on the PC (minimized is fine) and the PC awake. Phone access turns itself back on whenever Ensemble starts.
+- The QR code carries a private pairing key. **Unpair all phones** in the same panel makes a new one.
+- From the phone you type the project folder path (or pick a recent one); the PC's folder picker and pairing settings stay PC-only.
+- Runs started on either device show up on both, and live progress picks up where it left off when your phone wakes.
+
 ## How it uses your memberships (and why it's safe)
 
 Consumer plans like ChatGPT Plus, Claude Pro and Google AI Pro don't come with API keys, and scripting their websites breaks their terms and can get accounts flagged. Instead, each company ships an official command-line app that you sign into with your plan. Ensemble only **launches those official apps and reads what they print**. It never touches their login tokens, never automates a website, and never sends your data anywhere else. None of them need Node.js either:
@@ -88,6 +106,8 @@ Options: `--agents a,b,c`, `--rounds N`, `--chair <id>`, `--researcher/--planner
 
 The app's built-in server listens only on `127.0.0.1` on a random port, rejects requests addressed to any other host name, and requires a random per-launch token. Other websites open in your browser can't start runs. Programs Ensemble launches run hidden, without console windows.
 
+Phone access (off until you turn it on) adds a second server on `127.0.0.1:4318`, shared with your other devices only through Tailscale (HTTPS on port 8443, or this PC's Tailscale address as a fallback). It requires a long random pairing key, accepts only its own Tailscale name, and can't change pairing settings or open the PC's folder picker.
+
 ## Building from source
 
 Needs [Go](https://go.dev/dl/) 1.22+ (`winget install GoLang.Go`).
@@ -99,7 +119,7 @@ go test ./...
 
 From macOS/Linux, `./build.sh` cross-compiles the Windows programs. Pushing a tag like `v0.3.0` makes GitHub Actions test on Windows and Linux and attach the zips to a release.
 
-The tests use the test program itself as a fake AI and a fake Perplexity server to exercise council, research → build → review → fix, branch/commit handling, dirty-repo protection, cancelling, fallback when a plan runs out of usage or credit, key handling, config merging, and the server's security checks.
+The tests use the test program itself as a fake AI and a fake Perplexity server to exercise council, research → build → review → fix, branch/commit handling, dirty-repo protection, cancelling, fallback when a plan runs out of usage or credit, key handling, config merging, the server's security checks, and phone pairing against a stand-in Tailscale (HTTPS, HTTP fallback, unpairing, resuming live progress).
 
 ## License
 

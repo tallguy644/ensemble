@@ -428,3 +428,138 @@ func TestServerSecurityAndAPI(t *testing.T) {
 		}
 	}
 }
+
+// fakeTailscale puts a stand-in `tailscale` program on PATH (Unix only).
+func fakeTailscale(t *testing.T, httpsOK bool) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake tailscale script is Unix-only")
+	}
+	dir := t.TempDir()
+	certs := `["my-pc.tail1234.ts.net"]`
+	serve := "exit 0"
+	if !httpsOK {
+		certs = `[]`
+		serve = `echo "Serve is not enabled on your tailnet. To enable, visit: https://login.tailscale.com/f/serve?node=abc"; exit 1`
+	}
+	log := filepath.Join(dir, "calls.log")
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %s
+case "$1" in
+  status) echo '{"BackendState":"Running","CertDomains":%s,"Self":{"DNSName":"my-pc.tail1234.ts.net.","TailscaleIPs":["127.0.0.2","fd7a:115c:a1e0::1"]}}';;
+  serve) %s;;
+esac
+`, log, certs, serve)
+	os.WriteFile(filepath.Join(dir, "tailscale"), []byte(script), 0o755)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
+}
+
+func phoneGet(t *testing.T, url, host, tok string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest("GET", url, nil)
+	if host != "" {
+		req.Host = host
+	}
+	if tok != "" {
+		req.Header.Set("X-Ensemble-Token", tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestPhoneAccessHTTPS(t *testing.T) {
+	calls := fakeTailscale(t, true)
+	defer Phone.Disable()
+	Phone.Enable()
+	st := Phone.Status(false)
+	if st.Mode != "https" || !strings.HasPrefix(st.URL, "https://my-pc.tail1234.ts.net:8443/?token=") || !strings.HasPrefix(st.QR, "data:image/png;base64,") {
+		t.Fatalf("status %+v", st)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "serve --bg --https=8443 http://127.0.0.1:4318") {
+		t.Fatalf("serve not configured: %s", b)
+	}
+	tok := loadPhone().Token
+	base := "http://127.0.0.1:4318"
+	// Requests forwarded by Tailscale Serve carry the tailnet name.
+	if code, body := phoneGet(t, base+"/api/agents", "my-pc.tail1234.ts.net:8443", tok); code != 200 || !strings.Contains(body, `"remote":true`) || !strings.Contains(body, `"canPick":false`) {
+		t.Fatalf("agents via tailnet name: %d %s", code, body)
+	}
+	if code, body := phoneGet(t, base+"/api/agents", "", "wrong"); code != 401 || !strings.Contains(body, "Scan the QR code") {
+		t.Fatalf("wrong token: %d %s", code, body)
+	}
+	if code, _ := phoneGet(t, base+"/api/agents", "evil.example:8443", tok); code != 403 {
+		t.Fatalf("bad host: %d", code)
+	}
+	// The phone can't open pairing settings or the PC's folder picker.
+	if code, _ := phoneGet(t, base+"/api/phone", "", tok); code != 404 {
+		t.Fatalf("phone settings reachable from phone: %d", code)
+	}
+	// App files load without the token, so "Add to Home screen" works.
+	for _, p := range []string{"/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png"} {
+		if code, _ := phoneGet(t, base+p, "my-pc.tail1234.ts.net:8443", ""); code != 200 {
+			t.Fatalf("%s: %d", p, code)
+		}
+	}
+	// Unpairing makes the old token stop working.
+	Phone.ResetPairing()
+	if code, _ := phoneGet(t, base+"/api/agents", "", tok); code != 401 {
+		t.Fatalf("old token still works after reset: %d", code)
+	}
+	if code, _ := phoneGet(t, base+"/api/agents", "", loadPhone().Token); code != 200 {
+		t.Fatalf("new token rejected: %d", code)
+	}
+	Phone.Disable()
+	if _, err := http.Get(base + "/"); err == nil {
+		t.Fatal("phone server still running after disable")
+	}
+	if loadPhone().Enabled {
+		t.Fatal("still marked enabled")
+	}
+}
+
+func TestPhoneAccessHTTPFallback(t *testing.T) {
+	fakeTailscale(t, false)
+	defer Phone.Disable()
+	Phone.Enable()
+	st := Phone.Status(false)
+	if st.Mode != "http" || !strings.HasPrefix(st.URL, "http://127.0.0.2:4318/?token=") {
+		t.Fatalf("status %+v", st)
+	}
+	if !strings.Contains(st.FixURL, "login.tailscale.com/f/serve") || st.Problem == "" {
+		t.Fatalf("expected HTTPS-enable link: %+v", st)
+	}
+	if code, _ := phoneGet(t, "http://127.0.0.2:4318/api/agents", "", loadPhone().Token); code != 200 {
+		t.Fatalf("direct tailscale-IP access: %d", code)
+	}
+}
+
+func TestPhoneWithoutTailscale(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	defer Phone.Disable()
+	Phone.Enable()
+	st := Phone.Status(true)
+	if st.Serving || st.URL != "" || !strings.Contains(st.Problem, "Install Tailscale") {
+		t.Fatalf("%+v", st)
+	}
+}
+
+func TestStreamResumesFromOffset(t *testing.T) {
+	s, _ := NewServer(0)
+	go s.Serve()
+	defer s.Close()
+	r, _ := StartCouncil(CouncilRequest{Question: "hi", Agents: []string{"claude"}, Rounds: 1})
+	waitRun(t, r)
+	total := len(r.EventsFrom(0))
+	_, all := phoneGet(t, fmt.Sprintf("http://127.0.0.1:%d/api/runs/%s/events?token=%s", s.Port, r.ID, s.Token), "", "")
+	_, tail := phoneGet(t, fmt.Sprintf("http://127.0.0.1:%d/api/runs/%s/events?token=%s&from=%d", s.Port, r.ID, s.Token, total-1), "", "")
+	if strings.Count(all, "data: ") != total+1 || strings.Count(tail, "data: ") != 2 || !strings.Contains(tail, `"type":"done"`) {
+		t.Fatalf("all=%d tail=%q", strings.Count(all, "data: "), tail)
+	}
+}

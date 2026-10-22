@@ -15,7 +15,7 @@ import (
 // guiBuild is set to "1" for Ensemble.exe (the double-click app) at build time.
 var guiBuild = ""
 
-var version = "0.3.0"
+var version = "0.4.0"
 
 const helpText = `Ensemble: Claude, ChatGPT (Codex), Gemini, Perplexity and DeepSeek working together.
 Claude, ChatGPT and Gemini run on the memberships you already pay for; Perplexity
@@ -120,6 +120,8 @@ func runApp() error {
 	}
 	go func() { _ = srv.Serve() }()
 	defer srv.Close()
+	go Phone.Start()
+	defer Phone.Shutdown()
 	err = RunWindow(srv.URL)
 	if err == nil {
 		CancelAllRuns()
@@ -232,6 +234,8 @@ func runCLI(argv []string) error {
 			return err
 		}
 		go func() { _ = srv.Serve() }()
+		go Phone.Start()
+		defer Phone.Shutdown()
 		fmt.Printf("%s is running at:\n\n  %s\n\nKeep this window open. Press Ctrl+C to stop.\n", c.bold("Ensemble dashboard"), c.cyan(srv.URL))
 		if a.flags["open"] != "false" {
 			OpenBrowser(srv.URL)

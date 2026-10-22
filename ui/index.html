@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ensemble</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141412" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -100,12 +106,46 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
 .history { margin-top: 18px; font-size: 13.5px; }
 .history a { display: block; padding: 6px 0; color: var(--ink); text-decoration: none; border-top: 1px solid var(--line); cursor: pointer; }
 .history a small { color: var(--muted); }
+.qrbox { display: grid; place-items: center; background: #fff; border-radius: 12px; padding: 10px; margin: 6px auto 10px; width: 236px; }
+.qrbox img { width: 216px; height: 216px; image-rendering: pixelated; }
+.steps-list { margin: 0 0 6px; padding-left: 20px; color: var(--ink); font-size: 13.5px; }
+.steps-list li { margin: 4px 0; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); }
+.pill.on { color: var(--good); } .pill.off { color: var(--muted); }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; }
+.toggle b { font-size: 14px; }
+.warnbox { font-size: 13px; color: var(--warn); background: var(--soft); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.linkbtn { display: inline-block; margin-top: 6px; color: var(--ink); font-weight: 600; font-size: 13px; }
+/* Phone-sized screens */
+@media (max-width: 600px) {
+  body { font-size: 16px; }
+  header { gap: 10px; padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .logo { font-size: 17px; }
+  .chips { order: 3; width: 100%; margin-left: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; }
+  #recheck { margin-left: auto; }
+  main { padding: 12px 12px max(24px, env(safe-area-inset-bottom)); gap: 14px; }
+  .panel { padding: 16px; border-radius: 12px; }
+  textarea, input[type=text], select { font-size: 16px; }
+  textarea { min-height: 110px; }
+  .row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .empty { min-height: 0; padding: 18px 4px; }
+  .empty h2 { font-size: 19px; }
+  .flow { display: none; }
+  .out { max-height: 240px; }
+  .md table { display: block; overflow-x: auto; }
+  #view { scroll-margin-top: 8px; }
+  .newrun { display: inline-block !important; }
+}
+.newrun { display: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
 </style>
 </head>
 <body>
 <header>
   <div class="logo"><div class="logo-dots"><span style="background:var(--claude)"></span><span style="background:var(--codex)"></span><span style="background:var(--gemini)"></span><span style="background:var(--perplexity)"></span><span style="background:var(--deepseek)"></span></div>Ensemble</div>
   <div class="chips" id="chips"></div>
+  <button class="icon" id="phonebtn" title="Use Ensemble from your phone" hidden>Phone</button>
   <button class="icon" id="recheck" title="Re-check installed tools">Re-check</button>
 </header>
 <main>
@@ -130,7 +170,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
 
       <form id="build" hidden>
         <p class="hint">One model plans, another builds, a third reviews, and fixes loop until it's approved. Work lands on a new git branch in your project.</p>
-        <label for="dir">Project folder on this computer</label>
+        <label for="dir" id="dir-label">Project folder on this computer</label>
         <div class="dirrow"><input type="text" id="dir" list="recent" placeholder="C:\Users\you\Projects\my-app" autocomplete="off"><button type="button" id="browse" hidden>Browse…</button></div>
         <datalist id="recent"></datalist>
         <label for="task">What should they build or change?</label>
@@ -173,6 +213,30 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
   <p style="margin-top:14px">Paste the install line into <b>PowerShell</b> (Start menu → type “PowerShell”), then come back and press Re-check.</p>
   <div class="btns"><button value="close">Close</button><button class="primary" value="recheck" id="setup-recheck">Re-check</button></div>
 </form></dialog>
+<dialog id="phonedlg"><form method="dialog">
+  <h3>Use Ensemble from your phone</h3>
+  <p>Your phone becomes a remote for this PC: the AIs still run here, and you start and watch runs from anywhere. It goes over <b>Tailscale</b>, a free private network between your own devices, so nothing is opened to the internet.</p>
+  <div class="toggle"><div><b>Phone access</b><br><span class="pill off" id="ph-state">Off</span></div><button type="button" class="go" id="ph-toggle" style="width:auto;margin:0;padding:8px 16px">Turn on</button></div>
+  <div id="ph-problem" class="warnbox" hidden></div>
+  <a id="ph-fix" class="linkbtn" href="#" hidden>Open Tailscale settings →</a>
+  <div id="ph-pair" hidden>
+    <div class="qrbox"><img id="ph-qr" alt="QR code to open Ensemble on your phone"></div>
+    <ol class="steps-list">
+      <li>Install <b>Tailscale</b> on your phone and sign in with the same account as this PC.</li>
+      <li>Scan this code with your phone's camera and open the link.</li>
+      <li id="ph-install-step">In Chrome's ⋮ menu, tap <b>Add to Home screen</b> → <b>Install</b>.</li>
+    </ol>
+    <p style="margin:8px 0 0">Ensemble must be open on this PC (minimized is fine) and the PC awake for your phone to reach it.</p>
+  </div>
+  <div id="ph-setup" hidden>
+    <ol class="steps-list">
+      <li>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> on this PC and on your phone (both free).</li>
+      <li>Sign in to the same account on both.</li>
+      <li>Press <b>Re-check</b>.</li>
+    </ol>
+  </div>
+  <div class="btns"><button type="button" id="ph-reset" hidden>Unpair all phones</button><button type="button" id="ph-recheck">Re-check</button><button class="primary" value="close">Done</button></div>
+</form></dialog>
 <dialog id="keydlg"><form method="dialog" id="keyform">
   <h3 id="key-title">Add API key</h3>
   <p id="key-help"></p>
@@ -181,13 +245,22 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
   <div class="btns"><button value="cancel" formnovalidate>Cancel</button><button class="primary" id="key-save" value="save">Save key</button></div>
 </form></dialog>
 <script>
-const TOKEN = new URLSearchParams(location.search).get('token') || '';
+// The pairing token arrives once in the link; after that it's remembered on
+// this device and removed from the address bar.
+const TOKEN = (() => {
+  const fromUrl = new URLSearchParams(location.search).get('token');
+  try {
+    if (fromUrl) { localStorage.setItem('ensemble-token', fromUrl); history.replaceState(null, '', location.pathname); return fromUrl; }
+    return localStorage.getItem('ensemble-token') || '';
+  } catch { return fromUrl || ''; }
+})();
+let REMOTE = false;
 const COLORS = { claude: 'var(--claude)', codex: 'var(--codex)', gemini: 'var(--gemini)', perplexity: 'var(--perplexity)', deepseek: 'var(--deepseek)' };
 const KEY_HELP = {
   perplexity: 'Perplexity Pro does not include API use. Create a key at perplexity.ai/account/api and add a little credit (each research step costs roughly 5–10¢).',
   deepseek: 'DeepSeek has no membership; its API is pay-as-you-go and very cheap. Create a key at platform.deepseek.com and top up a few dollars. Needs Claude Code installed.',
 };
-let agents = [], roles = {}, current = null, es = null, history = [];
+let agents = [], roles = {}, current = null, es = null, runList = [];
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -236,11 +309,18 @@ function md(src) {
   return html;
 }
 const api = async (path, body) => {
-  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'X-Ensemble-Token': TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-  const j = await r.json();
+  let r;
+  try {
+    r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'X-Ensemble-Token': TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  } catch { throw new Error("Can't reach Ensemble on your PC. Make sure it's open, the PC is awake, and Tailscale is connected on both devices."); }
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) showUnpaired(j.error);
   if (!r.ok) throw new Error(j.error || 'Request failed');
   return j;
 };
+function showUnpaired(msg) {
+  document.querySelector('main').innerHTML = `<div class="panel" style="grid-column:1/-1"><h2 style="margin-top:0">Pair this device</h2><p>${esc(msg || 'This device is not paired.')}</p></div>`;
+}
 
 document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
@@ -248,10 +328,12 @@ document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
   $('#build').hidden = b.dataset.tab !== 'build';
 });
 
+const SMALL = () => window.matchMedia('(max-width: 600px)').matches;
+const short = (label) => (SMALL() ? label.replace(/\s*\(.*\)$/, '') : label);
 async function loadAgents(refresh) {
   const j = await api('/api/agents' + (refresh ? '?refresh=1' : ''));
   agents = j.agents; roles = j.roles;
-  $('#chips').innerHTML = agents.map((a) => `<div class="chip ${a.status}" data-id="${a.id}" title="${esc(a.status === 'ready' ? `${a.version || ''}${a.keyName ? '\nClick to change or remove the API key' : ''}` : a.status === 'needs-key' ? 'Click to add an API key' : `${a.membership}\nInstall: ${a.install}\nSign in: ${a.login}`)}"><span class="dot"></span>${esc(a.label)}${a.status === 'needs-key' ? ' <span class="key">+ key</span>' : ''}</div>`).join('');
+  $('#chips').innerHTML = agents.map((a) => `<div class="chip ${a.status}" data-id="${a.id}" title="${esc(a.status === 'ready' ? `${a.version || ''}${a.keyName ? '\nClick to change or remove the API key' : ''}` : a.status === 'needs-key' ? 'Click to add an API key' : `${a.membership}\nInstall: ${a.install}\nSign in: ${a.login}`)}"><span class="dot"></span>${esc(short(a.label))}${a.status === 'needs-key' ? ' <span class="key">+ key</span>' : ''}</div>`).join('');
   document.querySelectorAll('.chip').forEach((ch) => {
     const a = agents.find((x) => x.id === ch.dataset.id);
     if (a?.keyName && (a.status === 'needs-key' || a.status === 'ready')) { ch.style.cursor = 'pointer'; ch.onclick = () => openKey(a); }
@@ -262,15 +344,18 @@ async function loadAgents(refresh) {
   $('#research').disabled = !pxReady; $('#research').checked = pxReady;
   $('#research-label').textContent = pxReady ? 'Web research first (Perplexity)' : 'Web research first (add a Perplexity key to enable)';
   const ready = agents.filter((a) => a.status === 'ready');
-  $('#members').innerHTML = agents.map((a) => `<label><input type="checkbox" value="${a.id}" ${a.status === 'ready' ? 'checked' : 'disabled'}><span>${esc(a.label)}</span></label>`).join('');
-  $('#chair').innerHTML = ready.map((a) => `<option value="${a.id}" ${roles.chair[0] === a.id ? 'selected' : ''}>${esc(a.label)}</option>`).join('');
+  $('#members').innerHTML = agents.map((a) => `<label><input type="checkbox" value="${a.id}" ${a.status === 'ready' ? 'checked' : 'disabled'}><span>${esc(short(a.label))}</span></label>`).join('');
+  $('#chair').innerHTML = ready.map((a) => `<option value="${a.id}" ${roles.chair[0] === a.id ? 'selected' : ''}>${esc(short(a.label))}</option>`).join('');
   document.querySelectorAll('select[data-role]').forEach((sel) => {
     const pool = ready.filter((a) => !a.noFiles && (!sel.dataset.write || a.canWrite));
     const want = (roles[sel.dataset.role] || []).find((id) => pool.some((a) => a.id === id));
-    sel.innerHTML = pool.map((a) => `<option value="${a.id}" ${a.id === want ? 'selected' : ''}>${esc(a.label)}</option>`).join('') || '<option value="">No ready model</option>';
+    sel.innerHTML = pool.map((a) => `<option value="${a.id}" ${a.id === want ? 'selected' : ''}>${esc(short(a.label))}</option>`).join('') || '<option value="">No ready model</option>';
   });
   $('#recent').innerHTML = (j.recent || []).map((d) => `<option value="${esc(d)}">`).join('');
   $('#browse').hidden = !j.canPick;
+  REMOTE = !!j.remote;
+  $('#phonebtn').hidden = REMOTE;
+  $('#dir-label').textContent = REMOTE ? 'Project folder on your PC' : 'Project folder on this computer';
   if (!ready.length) $('#council-err').textContent = $('#build-err').textContent = 'No AIs are ready yet. Click a red or yellow chip at the top to set it up.';
 }
 $('#recheck').onclick = () => loadAgents(true).catch(alert);
@@ -297,6 +382,49 @@ document.addEventListener('click', (e) => {
   if (a && window.ensembleOpenExternal) { e.preventDefault(); window.ensembleOpenExternal(a.href); }
 });
 setInterval(() => { fetch('/api/ping', { headers: { 'X-Ensemble-Token': TOKEN } }).catch(() => {}); }, 30000);
+
+async function loadPhone(refresh, change) {
+  const j = change ? await api('/api/phone', change) : await api('/api/phone' + (refresh ? '?refresh=1' : ''));
+  const on = j.enabled && j.url;
+  $('#ph-state').textContent = j.enabled ? (on ? (j.mode === 'https' ? 'On · HTTPS' : 'On · HTTP') : 'On · waiting for Tailscale') : 'Off';
+  $('#ph-state').className = `pill ${on ? 'on' : 'off'}`;
+  $('#ph-toggle').textContent = j.enabled ? 'Turn off' : 'Turn on';
+  $('#ph-toggle').dataset.on = j.enabled ? '1' : '';
+  $('#ph-problem').hidden = !j.problem; $('#ph-problem').textContent = j.problem || '';
+  $('#ph-fix').hidden = !j.fixUrl; $('#ph-fix').href = j.fixUrl || '#';
+  $('#ph-fix').textContent = /download/.test(j.fixUrl || '') ? 'Download Tailscale →' : 'Open Tailscale settings →';
+  $('#ph-pair').hidden = !on;
+  $('#ph-reset').hidden = !j.enabled;
+  $('#ph-setup').hidden = !(j.enabled && !j.tailscale.running);
+  if (on) $('#ph-qr').src = j.qr;
+  $('#ph-install-step').innerHTML = j.mode === 'https'
+    ? 'In Chrome\'s ⋮ menu, tap <b>Add to Home screen</b> → <b>Install</b>. It opens full-screen like an app.'
+    : 'In Chrome\'s ⋮ menu, tap <b>Add to Home screen</b> for a shortcut (turn on Tailscale HTTPS above for a full app).';
+}
+$('#phonebtn').onclick = () => { $('#phonedlg').showModal(); loadPhone(true).catch((e) => { $('#ph-problem').hidden = false; $('#ph-problem').textContent = e.message; }); };
+$('#ph-toggle').onclick = async () => {
+  $('#ph-toggle').disabled = true;
+  try { await loadPhone(false, { enable: !$('#ph-toggle').dataset.on }); }
+  catch (e) { $('#ph-problem').hidden = false; $('#ph-problem').textContent = e.message; }
+  $('#ph-toggle').disabled = false;
+};
+$('#ph-recheck').onclick = () => loadPhone(true).catch(() => {});
+$('#ph-reset').onclick = async () => {
+  if (!confirm('Unpair all phones? Each one will need to scan the new QR code.')) return;
+  await loadPhone(false, { reset: true });
+};
+
+// Runs started on any device (PC or phone) show up everywhere.
+async function loadRuns() {
+  try {
+    const list = await api('/api/runs');
+    runList = list;
+    renderHistory();
+  } catch {}
+}
+setInterval(loadRuns, 10000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadRuns(); if (resumeStream) resumeStream(); } });
+if ('serviceWorker' in navigator && location.hostname !== '127.0.0.1') navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 let keyAgent = null;
 function openKey(a) {
@@ -344,19 +472,40 @@ $('#build').onsubmit = async (e) => {
   } catch (err) { $('#build-err').textContent = err.message; }
 };
 
+// Android only allows notifications through the service worker.
+function notify(title, body) {
+  const opts = { body, icon: '/icon-192.png', tag: 'ensemble-run' };
+  if (navigator.serviceWorker?.controller) navigator.serviceWorker.ready.then((r) => r.showNotification(title, opts)).catch(() => {});
+  else { try { new Notification(title, opts); } catch {} }
+}
+let resumeStream = null;
 function watch(run) {
   if (es) es.close();
   current = run;
-  if (!history.find((h) => h.id === run.id)) history.unshift(run);
+  if (!runList.find((h) => h.id === run.id)) runList.unshift({ ...run, status: 'running' });
   renderHistory();
   $('#empty').hidden = true;
   const v = $('#run'); v.hidden = false;
-  v.innerHTML = `<div class="runhead"><h2>${esc(run.title)}</h2><span class="status" id="st">Running</span></div><div id="steps"></div><div class="actions" id="acts"><button id="cancel">Cancel</button></div><div id="result"></div>`;
+  v.innerHTML = `<div class="runhead"><h2>${esc(run.title)}</h2><span class="status" id="st">Running</span><button class="newrun" id="newrun">New</button></div><div id="steps"></div><div class="actions" id="acts"><button id="cancel">Cancel</button></div><div id="result"></div>`;
   $('#cancel').onclick = () => api(`/api/runs/${run.id}/cancel`, {});
+  $('#newrun').onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (window.matchMedia('(max-width: 900px)').matches) setTimeout(() => $('#view').scrollIntoView({ block: 'start' }), 60);
   const steps = {}, timers = {};
-  es = new EventSource(`/api/runs/${run.id}/events?token=${TOKEN}`);
-  es.onmessage = (m) => {
+  let received = 0, finished = false;
+  // Phones drop connections when the screen sleeps; reconnect and continue
+  // from the last event instead of starting over.
+  const connect = () => {
+    if (finished || current !== run) return;
+    if (es) es.close();
+    es = new EventSource(`/api/runs/${run.id}/events?token=${TOKEN}&from=${received}`);
+    es.onmessage = onMessage;
+    es.onerror = () => { es.close(); if (!finished && current === run) setTimeout(connect, 2500); };
+  };
+  resumeStream = () => { if (!finished && current === run && (!es || es.readyState === 2)) connect(); };
+  const onMessage = (m) => {
     const e = JSON.parse(m.data);
+    if (e.type === 'hello') return;
+    received++;
     const box = $('#steps');
     if (e.type === 'phase') box.insertAdjacentHTML('beforeend', `<div class="phase">${esc(e.name)}${e.detail ? ` · <span style="text-transform:none;letter-spacing:0;font-weight:500">${esc(e.detail)}</span>` : ''}</div>`);
     if (e.type === 'note') box.insertAdjacentHTML('beforeend', `<div class="note ${e.level}">${esc(e.text)}</div>`);
@@ -382,15 +531,17 @@ function watch(run) {
       if (!e.ok) el.querySelector('.what').textContent += ` — ${e.error}`;
     }
     if (e.type === 'done' || e.type === 'error') {
+      finished = true;
       Object.values(timers).forEach(clearInterval);
       es.close();
       const st = $('#st');
       st.textContent = e.type === 'done' ? 'Done' : (e.status === 'cancelled' ? 'Cancelled' : 'Failed');
       st.className = `status ${e.type === 'done' ? 'done' : e.status || 'failed'}`;
-      const h = history.find((x) => x.id === run.id); if (h) h.status = e.type === 'done' ? 'done' : e.status;
+      const h = runList.find((x) => x.id === run.id); if (h) h.status = e.type === 'done' ? 'done' : e.status;
       renderHistory();
       if (e.type === 'done') {
         $('#result').innerHTML = `<div class="result md">${md(e.result.markdown)}</div>`;
+        if (document.hidden && 'Notification' in window && Notification.permission === 'granted') notify('Ensemble: done', run.title);
         $('#acts').innerHTML = `<button id="copy">Copy result</button>`;
         $('#copy').onclick = () => navigator.clipboard.writeText(e.result.markdown);
       } else {
@@ -399,16 +550,25 @@ function watch(run) {
       }
     }
   };
+  connect();
 }
 
 function renderHistory() {
-  $('#history').innerHTML = history.length ? `<div class="phase">This session</div>` + history.map((h) =>
-    `<a data-id="${h.id}">${esc(h.title)}<br><small>${h.kind} · ${h.status || 'running'}</small></a>`).join('') : '';
-  document.querySelectorAll('#history a').forEach((a) => a.onclick = () => watch(history.find((h) => h.id === a.dataset.id)));
+  $('#history').innerHTML = runList.length ? `<div class="phase">Recent runs</div>` + runList.map((h) =>
+    `<a data-id="${h.id}">${esc(h.title)}<br><small>${h.kind} · ${h.status || 'running'}${current && current.id === h.id ? ' · showing' : ''}</small></a>`).join('') : '';
+  document.querySelectorAll('#history a').forEach((a) => a.onclick = () => watch(runList.find((h) => h.id === a.dataset.id)));
 }
 
-if (!TOKEN) document.body.innerHTML = '<p style="padding:40px">Open Ensemble from its app icon, or use the link printed in the terminal (it includes a security token).</p>';
-else loadAgents().catch((e) => { $('#council-err').textContent = e.message; });
+if (!TOKEN) {
+  document.querySelector('main').innerHTML = `<div class="panel" style="grid-column:1/-1"><h2 style="margin-top:0">Pair this device</h2><p>On your PC, open Ensemble, click <b>Phone</b>, and scan the QR code. (On the PC itself, open Ensemble from its app icon.)</p></div>`;
+} else {
+  loadAgents().catch((e) => { $('#council-err').textContent = e.message; });
+  loadRuns();
+  // Ask once (on phones) so a finished run can notify you while the app is in the background.
+  if (location.hostname !== '127.0.0.1' && 'Notification' in window && Notification.permission === 'default') {
+    document.addEventListener('click', () => Notification.requestPermission().catch(() => {}), { once: true });
+  }
+}
 </script>
 </body>
 </html>

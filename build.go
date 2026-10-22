@@ -292,7 +292,7 @@ PLAN (also saved at .ensemble/PLAN.md):
 		}
 		stat, patch := currentDiff(o.Dir, o.Git.StartRef)
 		if patch == "" {
-			r.Note("No file changes were made.", "warn")
+			r.Note("No changes compared to before this run (nothing was edited, or the edits cancelled out).", "warn")
 			verdict = "no-changes"
 			break
 		}

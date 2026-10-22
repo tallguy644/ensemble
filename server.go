@@ -1,11 +1,14 @@
 package main
 
-// Local dashboard server. Binds to 127.0.0.1 only, rejects requests addressed
-// to any other host name, and requires a per-launch token, so other websites
+// Dashboard server. The desktop server binds to 127.0.0.1 with a per-launch
+// token. The phone server (phone.go) uses a fixed port and a long-lived
+// pairing token, and is reached only through your private Tailscale network.
+// Both reject requests addressed to unexpected host names, so other websites
 // in a browser can't start runs on your computer.
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -18,19 +21,64 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 //go:embed ui/index.html
 var uiHTML []byte
 
+//go:embed assets/icon-192.png
+var icon192 []byte
+
+//go:embed assets/icon.png
+var icon512 []byte
+
+const manifestJSON = `{
+  "name": "Ensemble",
+  "short_name": "Ensemble",
+  "description": "Your AIs working as one team",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f5f1",
+  "theme_color": "#1c1b19",
+  "icons": [
+    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}`
+
+// A minimal service worker: it makes the page installable as an app. It never
+// caches anything, because Ensemble only works while the PC is reachable.
+const serviceWorkerJS = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', () => {});
+`
+
 type Server struct {
-	Token    string
-	Port     int
-	URL      string
-	listener net.Listener
-	http     *http.Server
-	hosts    map[string]bool
+	Token     string
+	Port      int
+	URL       string
+	Remote    bool // true for the phone server
+	listeners []net.Listener
+	http      *http.Server
+	hostsMu   sync.RWMutex
+	hosts     map[string]bool
+}
+
+// AllowHost lets requests addressed to another name reach this server
+// (used for the Tailscale HTTPS name).
+func (s *Server) AllowHost(h string) {
+	s.hostsMu.Lock()
+	s.hosts[h] = true
+	s.hostsMu.Unlock()
+}
+
+func (s *Server) hostOK(h string) bool {
+	s.hostsMu.RLock()
+	defer s.hostsMu.RUnlock()
+	return s.hosts[h]
 }
 
 func recentFile() string { return filepath.Join(HomeDir(), "recent-folders.json") }
@@ -55,22 +103,42 @@ func addRecent(dir string) {
 	_ = os.WriteFile(recentFile(), b, 0o600)
 }
 
-// NewServer listens on 127.0.0.1:port (port 0 picks a free one).
-func NewServer(port int) (*Server, error) {
-	tok := make([]byte, 16)
-	if _, err := rand.Read(tok); err != nil {
-		return nil, err
+func randomToken(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
 	}
+	return hex.EncodeToString(b)
+}
+
+// NewServer is the desktop server: 127.0.0.1:port (0 picks a free port) with a
+// fresh token each launch.
+func NewServer(port int) (*Server, error) {
+	return newServerOn(randomToken(16), port, nil, false)
+}
+
+// newServerOn always listens on 127.0.0.1 and also on any extra IPs given.
+func newServerOn(token string, port int, extraIPs []string, remote bool) (*Server, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return nil, err
 	}
 	p := ln.Addr().(*net.TCPAddr).Port
 	s := &Server{
-		Token:    hex.EncodeToString(tok),
-		Port:     p,
-		listener: ln,
-		hosts:    map[string]bool{fmt.Sprintf("127.0.0.1:%d", p): true, fmt.Sprintf("localhost:%d", p): true},
+		Token:     token,
+		Port:      p,
+		Remote:    remote,
+		listeners: []net.Listener{ln},
+		hosts:     map[string]bool{fmt.Sprintf("127.0.0.1:%d", p): true, fmt.Sprintf("localhost:%d", p): true},
+	}
+	for _, ip := range extraIPs {
+		addr := net.JoinHostPort(ip, fmt.Sprint(p))
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue // that address isn't usable right now; the others still work
+		}
+		s.listeners = append(s.listeners, l)
+		s.hosts[addr] = true
 	}
 	s.URL = fmt.Sprintf("http://127.0.0.1:%d/?token=%s", p, s.Token)
 	s.http = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
@@ -78,7 +146,11 @@ func NewServer(port int) (*Server, error) {
 }
 
 func (s *Server) Serve() error {
-	err := s.http.Serve(s.listener)
+	errs := make(chan error, len(s.listeners))
+	for _, l := range s.listeners {
+		go func(l net.Listener) { errs <- s.http.Serve(l) }(l)
+	}
+	err := <-errs
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -116,22 +188,39 @@ var runPath = regexp.MustCompile(`^/api/runs/([\w-]+)/(events|cancel)$`)
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Block DNS rebinding: only accept requests addressed to this local server.
-	if !s.hosts[r.Host] {
+	if !s.hostOK(r.Host) {
 		sendErr(w, http.StatusForbidden, "Bad host")
 		return
 	}
-	if r.Method == http.MethodGet && r.URL.Path == "/" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(uiHTML)
-		return
+	if r.Method == http.MethodGet {
+		static := map[string]struct {
+			ctype string
+			body  []byte
+		}{
+			"/":                     {"text/html; charset=utf-8", uiHTML},
+			"/manifest.webmanifest": {"application/manifest+json", []byte(manifestJSON)},
+			"/sw.js":                {"text/javascript", []byte(serviceWorkerJS)},
+			"/icon-192.png":         {"image/png", icon192},
+			"/icon-512.png":         {"image/png", icon512},
+		}
+		if f, ok := static[r.URL.Path]; ok {
+			w.Header().Set("Content-Type", f.ctype)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			_, _ = w.Write(f.body)
+			return
+		}
 	}
 	tok := r.Header.Get("X-Ensemble-Token")
 	if tok == "" {
 		tok = r.URL.Query().Get("token")
 	}
-	if tok != s.Token {
-		sendErr(w, http.StatusUnauthorized, "Missing or wrong token. Restart Ensemble.")
+	if subtleEqual(tok, s.Token) == false {
+		msg := "Missing or wrong token. Restart Ensemble."
+		if s.Remote {
+			msg = "This phone isn't paired, or pairing was reset. Scan the QR code in Ensemble on your PC (Phone button) again."
+		}
+		sendErr(w, http.StatusUnauthorized, msg)
 		return
 	}
 
@@ -156,7 +245,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"roles":      cfg.Roles,
 			"defaults":   map[string]int{"councilRounds": cfg.CouncilRounds, "maxReviewRounds": cfg.MaxReviewRounds},
 			"recent":     readRecent(),
-			"canPick":    CanPickFolder(),
+			"canPick":    CanPickFolder() && !s.Remote,
+			"remote":     s.Remote,
 			"configPath": ConfigPath(),
 		})
 
@@ -183,7 +273,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ClearStatusCache()
 		sendJSON(w, 200, map[string]bool{"ok": true})
 
-	case r.Method == http.MethodPost && r.URL.Path == "/api/pick-folder":
+	case r.URL.Path == "/api/phone" && !s.Remote:
+		if r.Method == http.MethodPost {
+			var body struct {
+				Enable *bool `json:"enable"`
+				Reset  bool  `json:"reset"`
+			}
+			if err := readJSON(r, &body); err != nil {
+				sendErr(w, 400, err.Error())
+				return
+			}
+			if body.Reset {
+				Phone.ResetPairing()
+			}
+			if body.Enable != nil {
+				if *body.Enable {
+					Phone.Enable()
+				} else {
+					Phone.Disable()
+				}
+			}
+		}
+		sendJSON(w, 200, Phone.Status(r.URL.Query().Has("refresh")))
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/pick-folder" && !s.Remote:
 		dir, err := PickFolder()
 		if err != nil {
 			sendErr(w, 400, err.Error())
@@ -267,7 +380,9 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request, run *Run) 
 	defer run.Unsubscribe(wake)
 	ping := time.NewTicker(20 * time.Second)
 	defer ping.Stop()
+	// ?from=N resumes a stream after a phone wakes up, without repeating events.
 	next := 0
+	fmt.Sscanf(r.URL.Query().Get("from"), "%d", &next)
 	for {
 		for _, e := range run.EventsFrom(next) {
 			next++
@@ -287,4 +402,8 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request, run *Run) 
 			return
 		}
 	}
+}
+
+func subtleEqual(a, b string) bool {
+	return len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
