@@ -70,15 +70,38 @@ function parseVerdict(text) {
   return m[1].toUpperCase().startsWith('APPROVED') ? 'approved' : 'changes';
 }
 
-export async function runBuild(run, { dir, task, roles = {}, maxReviewRounds, testCommand, git: gitInfo }) {
+export async function runBuild(run, { dir, task, roles = {}, maxReviewRounds, testCommand, research = true, git: gitInfo }) {
   const R = run.config.roles;
-  const pref = (role) => [roles[role], ...R[role]].filter(Boolean);
+  // Every role except research needs to read the project folder.
+  const pref = (role) => [roles[role], ...R[role]].filter((id) => id && (role === 'researcher' || !run.config.agents[id]?.noFiles));
   const ensDir = path.join(dir, '.ensemble');
   fs.mkdirSync(ensDir, { recursive: true });
   const rounds = maxReviewRounds ?? run.config.maxReviewRounds;
 
   if (gitInfo.created) run.note('This folder was not a git repository, so Ensemble created one with a baseline commit.');
   if (gitInfo.branch) run.note(`Working on branch ${gitInfo.branch}. Your other branches are untouched.`);
+
+  // 0. Research (optional): a web-searching model gathers current facts first.
+  let findings = null;
+  const researchers = pref('researcher').filter((id) => run.canUse(id, 'read'));
+  if (research && researchers.length) {
+    run.emitEvent({ type: 'phase', name: 'Research', detail: 'Current docs, versions and pitfalls from the web' });
+    try {
+      findings = await run.step({
+        title: 'Research',
+        prefs: researchers,
+        mode: 'read',
+        prompt: `You are the researcher on a team of AI coding agents. Another agent will plan and build the task below; they can read the project but cannot search the web. Search the web and give them what they need that may be newer than their training: current stable versions of the libraries or tools involved, relevant API changes or deprecations, the recommended approach today, and known pitfalls. Be concise and practical, use bullet points, and cite sources. Do not write the implementation. If the task needs no outside facts, say so in one line.
+
+TASK:
+${task}`,
+      });
+      fs.writeFileSync(path.join(ensDir, 'RESEARCH.md'), `# Research (by ${findings.label})\n\n${findings.output}\n`);
+    } catch (e) {
+      run.note(`Skipping research: ${e.message}`, 'warn');
+    }
+  }
+  const researchBlock = findings ? `\n\nWEB RESEARCH (from ${findings.label}; prefer it over your own memory for versions and APIs):\n${findings.output}` : '';
 
   // 1. Plan
   run.emitEvent({ type: 'phase', name: 'Plan' });
@@ -99,7 +122,7 @@ Reply with markdown containing:
 If the folder is empty, plan the project from scratch (structure, stack, files).
 
 TASK:
-${task}`,
+${task}${researchBlock}`,
   });
   const planText = `# Plan (by ${plan.label})\n\nTask: ${task}\n\n${plan.output}\n`;
   fs.writeFileSync(path.join(ensDir, 'PLAN.md'), planText);
@@ -218,7 +241,7 @@ ${tests && !tests.ok ? `\nFAILING TESTS (${testCommand}):\n\`\`\`\n${tests.outpu
 
 | Step | Model |
 |---|---|
-| Plan | ${plan.label} |
+${findings ? `| Research | ${findings.label} |\n` : ''}| Plan | ${plan.label} |
 | Build | ${build.label} |
 | Review | ${lastReview?.label || '—'} |
 ${fixers.size ? `| Fix | ${[...fixers].join(', ')} |\n` : ''}

@@ -11,6 +11,7 @@ import { runBuild, prepareGit } from './workflows/build.js';
 export const runs = new Map();
 
 let statusCache = null;
+export function clearStatusCache() { statusCache = null; }
 export async function agentStatus({ refresh = false } = {}) {
   if (statusCache && !refresh && Date.now() - statusCache.at < 60000) return statusCache.list;
   const config = loadConfig();
@@ -68,7 +69,7 @@ export async function startCouncil({ question, agents, rounds, chair, attachment
   }));
 }
 
-export async function startBuild({ dir, task, roles, maxReviewRounds, testCommand, allowDirty, newBranch = true }) {
+export async function startBuild({ dir, task, roles, maxReviewRounds, testCommand, allowDirty, newBranch = true, research = true }) {
   if (!task?.trim()) throw new Error('Describe what to build first.');
   if (!dir) throw new Error('Choose a project folder.');
   const abs = path.resolve(dir.replace(/^~(?=$|[\\/])/, process.env.HOME || process.env.USERPROFILE || '~'));
@@ -93,6 +94,7 @@ export async function startBuild({ dir, task, roles, maxReviewRounds, testComman
     roles: roles || {},
     maxReviewRounds: maxReviewRounds === undefined || maxReviewRounds === '' ? undefined : Number(maxReviewRounds),
     testCommand: testCommand?.trim() || null,
+    research: research !== false,
     git: gitInfo,
   }));
 }

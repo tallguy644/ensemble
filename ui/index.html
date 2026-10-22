@@ -10,7 +10,7 @@
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1c1b19; --muted: #6d6a63; --line: #e4e1d8;
   --soft: #efede6; --accent: #1c1b19; --warn: #b26b00; --bad: #b3261e; --good: #1b7f4b;
-  --claude: #d97757; --codex: #10a37f; --gemini: #4285f4;
+  --claude: #d97757; --codex: #10a37f; --gemini: #4285f4; --perplexity: #20808d; --deepseek: #4d6bfe;
   --radius: 14px; --mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -29,6 +29,17 @@ header { display: flex; align-items: center; gap: 16px; padding: 18px 28px; bord
 .chip.ready .dot { background: var(--good); }
 .chip.missing { opacity: .6; }
 .chip.missing .dot { background: var(--bad); }
+.chip.needs-key { cursor: pointer; border-style: dashed; }
+.chip.needs-key .dot { background: var(--warn); }
+.chip.needs-key:hover { border-color: var(--ink); }
+.chip .key { font-size: 11.5px; color: var(--warn); font-weight: 600; }
+dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); padding: 22px; width: min(440px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog h3 { margin: 0 0 6px; } dialog p { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; }
+dialog input { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); color: var(--ink); }
+dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+dialog .btns button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+dialog .btns button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
 button.icon { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; }
 main { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 24px; padding: 24px 28px; max-width: 1500px; margin: 0 auto; }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 14px 16px; } }
@@ -84,7 +95,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
 </head>
 <body>
 <header>
-  <div class="logo"><div class="logo-dots"><span style="background:var(--claude)"></span><span style="background:var(--codex)"></span><span style="background:var(--gemini)"></span></div>Ensemble</div>
+  <div class="logo"><div class="logo-dots"><span style="background:var(--claude)"></span><span style="background:var(--codex)"></span><span style="background:var(--gemini)"></span><span style="background:var(--perplexity)"></span><span style="background:var(--deepseek)"></span></div>Ensemble</div>
   <div class="chips" id="chips"></div>
   <button class="icon" id="recheck" title="Re-check installed tools">Re-check</button>
 </header>
@@ -121,6 +132,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
           <div><label for="r-reviewer">Reviews</label><select id="r-reviewer" data-role="reviewer"></select></div>
           <div><label for="r-fixer">Fixes</label><select id="r-fixer" data-role="fixer" data-write="1"></select></div>
         </div>
+        <label class="inline" style="margin-top:14px"><input type="checkbox" id="research" checked> <span id="research-label">Web research first (Perplexity)</span></label>
         <details class="more"><summary>More options</summary>
           <label for="test">Test command (optional)</label>
           <input type="text" id="test" placeholder="npm test">
@@ -138,15 +150,26 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
   <section class="panel" id="view">
     <div class="empty" id="empty"><div>
       <h2>Your AIs, working as one team</h2>
-      <p>Uses the Claude, ChatGPT and Gemini plans you already have, through each company's official app.</p>
-      <div class="flow"><span>Plan · Claude</span><span>→</span><span>Build · ChatGPT</span><span>→</span><span>Review · Gemini</span><span>→</span><span>Fix</span></div>
+      <p>Uses the Claude, ChatGPT and Gemini plans you already have through each company's official app, plus Perplexity and DeepSeek on pay-as-you-go keys.</p>
+      <div class="flow"><span>Research · Perplexity</span><span>→</span><span>Plan · Claude</span><span>→</span><span>Build · ChatGPT</span><span>→</span><span>Review · Gemini</span><span>→</span><span>Fix</span></div>
     </div></div>
     <div id="run" hidden></div>
   </section>
 </main>
+<dialog id="keydlg"><form method="dialog" id="keyform">
+  <h3 id="key-title">Add API key</h3>
+  <p id="key-help"></p>
+  <input type="password" id="key-input" autocomplete="off" placeholder="Paste your API key">
+  <div class="err" id="key-err"></div>
+  <div class="btns"><button value="cancel" formnovalidate>Cancel</button><button class="primary" id="key-save" value="save">Save key</button></div>
+</form></dialog>
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
-const COLORS = { claude: 'var(--claude)', codex: 'var(--codex)', gemini: 'var(--gemini)' };
+const COLORS = { claude: 'var(--claude)', codex: 'var(--codex)', gemini: 'var(--gemini)', perplexity: 'var(--perplexity)', deepseek: 'var(--deepseek)' };
+const KEY_HELP = {
+  perplexity: 'Perplexity Pro does not include API use. Create a key at perplexity.ai/account/api and add a little credit (each research step costs roughly 5–10¢).',
+  deepseek: 'DeepSeek has no membership; its API is pay-as-you-go and very cheap. Create a key at platform.deepseek.com and top up a few dollars. Needs Claude Code installed.',
+};
 let agents = [], roles = {}, current = null, es = null, history = [];
 
 const $ = (s) => document.querySelector(s);
@@ -211,12 +234,20 @@ document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
 async function loadAgents(refresh) {
   const j = await api('/api/agents' + (refresh ? '?refresh=1' : ''));
   agents = j.agents; roles = j.roles;
-  $('#chips').innerHTML = agents.map((a) => `<div class="chip ${a.status}" title="${esc(a.status === 'ready' ? a.version || '' : `${a.membership}\nInstall: ${a.install}\nSign in: ${a.login}`)}"><span class="dot"></span>${esc(a.label)}</div>`).join('');
+  $('#chips').innerHTML = agents.map((a) => `<div class="chip ${a.status}" data-id="${a.id}" title="${esc(a.status === 'ready' ? `${a.version || ''}${a.keyName ? '\nClick to change or remove the API key' : ''}` : a.status === 'needs-key' ? 'Click to add an API key' : `${a.membership}\nInstall: ${a.install}\nSign in: ${a.login}`)}"><span class="dot"></span>${esc(a.label)}${a.status === 'needs-key' ? ' <span class="key">+ key</span>' : ''}</div>`).join('');
+  document.querySelectorAll('.chip').forEach((ch) => {
+    const a = agents.find((x) => x.id === ch.dataset.id);
+    if (a?.keyName && (a.status === 'needs-key' || a.status === 'ready')) { ch.style.cursor = 'pointer'; ch.onclick = () => openKey(a); }
+  });
+  const px = agents.find((a) => a.id === 'perplexity');
+  const pxReady = px?.status === 'ready';
+  $('#research').disabled = !pxReady; $('#research').checked = pxReady;
+  $('#research-label').textContent = pxReady ? 'Web research first (Perplexity)' : 'Web research first (add a Perplexity key to enable)';
   const ready = agents.filter((a) => a.status === 'ready');
   $('#members').innerHTML = agents.map((a) => `<label><input type="checkbox" value="${a.id}" ${a.status === 'ready' ? 'checked' : 'disabled'}><span>${esc(a.label)}</span></label>`).join('');
   $('#chair').innerHTML = ready.map((a) => `<option value="${a.id}" ${roles.chair[0] === a.id ? 'selected' : ''}>${esc(a.label)}</option>`).join('');
   document.querySelectorAll('select[data-role]').forEach((sel) => {
-    const pool = ready.filter((a) => !sel.dataset.write || a.canWrite);
+    const pool = ready.filter((a) => !a.noFiles && (!sel.dataset.write || a.canWrite));
     const want = (roles[sel.dataset.role] || []).find((id) => pool.some((a) => a.id === id));
     sel.innerHTML = pool.map((a) => `<option value="${a.id}" ${a.id === want ? 'selected' : ''}>${esc(a.label)}</option>`).join('') || '<option value="">No ready model</option>';
   });
@@ -224,6 +255,32 @@ async function loadAgents(refresh) {
   if (!ready.length) $('#council-err').textContent = $('#build-err').textContent = 'No AI tools are ready yet. Hover a red chip to see how to install and sign in, then press Re-check.';
 }
 $('#recheck').onclick = () => loadAgents(true).catch(alert);
+
+let keyAgent = null;
+function openKey(a) {
+  keyAgent = a;
+  $('#key-title').textContent = `${a.label} API key`;
+  $('#key-help').textContent = KEY_HELP[a.id] || a.install;
+  $('#key-input').value = ''; $('#key-err').textContent = '';
+  $('#key-save').textContent = 'Save key';
+  $('#keyform').dataset.ready = a.status === 'ready' ? '1' : '';
+  $('#keydlg').showModal();
+}
+$('#keyform').onsubmit = async (e) => {
+  if (e.submitter?.value !== 'save') return;
+  e.preventDefault();
+  const v = $('#key-input').value.trim();
+  try {
+    if (!v && $('#keyform').dataset.ready) {
+      if (!confirm(`Remove the saved ${keyAgent.label} key?`)) return;
+      await api('/api/keys', { name: keyAgent.keyName, remove: true });
+    } else {
+      await api('/api/keys', { name: keyAgent.keyName, key: v });
+    }
+    $('#keydlg').close();
+    await loadAgents(true);
+  } catch (err) { $('#key-err').textContent = err.message; }
+};
 
 $('#council').onsubmit = async (e) => {
   e.preventDefault(); $('#council-err').textContent = '';
@@ -240,7 +297,7 @@ $('#build').onsubmit = async (e) => {
   e.preventDefault(); $('#build-err').textContent = '';
   const r = {}; document.querySelectorAll('select[data-role]').forEach((s) => { if (s.value) r[s.dataset.role] = s.value; });
   try {
-    const run = await api('/api/build', { dir: $('#dir').value, task: $('#task').value, roles: r, testCommand: $('#test').value, maxReviewRounds: $('#maxr').value, allowDirty: $('#dirty').checked });
+    const run = await api('/api/build', { dir: $('#dir').value, task: $('#task').value, roles: r, testCommand: $('#test').value, maxReviewRounds: $('#maxr').value, allowDirty: $('#dirty').checked, research: $('#research').checked });
     watch(run);
   } catch (err) { $('#build-err').textContent = err.message; }
 };

@@ -1,7 +1,7 @@
 {
   "name": "ensemble-ai",
   "version": "0.1.0",
-  "description": "Make Claude, ChatGPT (Codex) and Gemini work together on projects using the memberships you already pay for, by driving their official CLIs.",
+  "description": "Make Claude, ChatGPT (Codex), Gemini, Perplexity and DeepSeek work together on projects, driving official CLIs on your existing memberships plus pay-as-you-go keys.",
   "type": "module",
   "bin": {
     "ensemble": "bin/ensemble.js"

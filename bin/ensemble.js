@@ -2,19 +2,25 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { agentStatus, startCouncil, startBuild } from '../src/engine.js';
+import { setKey, removeKey, keySource } from '../src/keys.js';
 import { createServer } from '../src/server.js';
 import { CONFIG_PATH, ensureHome, DEFAULT_ROLES } from '../src/config.js';
 
 const HELP = `Ensemble: Claude, ChatGPT (Codex) and Gemini working together on your existing memberships.
 
+Pay-as-you-go extras: Perplexity (web research with sources) and DeepSeek
+need API keys, since neither offers a membership that can be used this way.
+
 Usage:
   ensemble ui [--port 4317] [--no-open]      Open the dashboard (recommended)
   ensemble doctor                            Check which AIs are installed and ready
   ensemble council "question" [options]      All models answer, critique each other, then merge
-      --agents claude,codex,gemini   --rounds 2   --chair claude   --file notes.md
+      --agents claude,codex,gemini,perplexity,deepseek   --rounds 2   --chair claude   --file notes.md
   ensemble build <folder> "task" [options]   Plan → build → review → fix on a new git branch
       --planner claude --builder codex --reviewer gemini --fixer claude
       --rounds 2   --test "npm test"   --allow-dirty   --no-branch
+      --no-research                  skip the Perplexity web-research step
+  ensemble key <perplexity|deepseek> <key>   Save an API key (or --remove)
   ensemble config                            Create/show your config file
 
 Flags: -v / --verbose streams each model's raw output.`;
@@ -52,6 +58,10 @@ async function doctor() {
   for (const a of list) {
     if (a.status === 'ready') {
       console.log(`${c.green('✔')} ${c.bold(a.label)} ${c.dim(a.version || '')}${a.canWrite ? '' : c.dim('  (review/answer only; set allowWrite to let it edit files)')}`);
+    } else if (a.status === 'needs-key') {
+      console.log(`${c.yellow('●')} ${c.bold(a.label)} — needs an API key ${c.dim(`(${a.membership})`)}`);
+      console.log(`    ${a.install}`);
+      console.log(`    Then: ensemble key ${a.keyName} <your-key>`);
     } else if (a.status === 'disabled') {
       console.log(`${c.dim('–')} ${a.label} ${c.dim('(disabled in config)')}`);
     } else {
@@ -88,6 +98,15 @@ async function main() {
   if (!cmd || cmd === 'help' || flags.help) return console.log(HELP);
 
   if (cmd === 'doctor') return doctor();
+
+  if (cmd === 'key') {
+    const [name, value] = pos;
+    if (!name) return console.log('Usage: ensemble key <perplexity|deepseek> <key>   (or --remove)');
+    if (flags.remove) { removeKey(name); return console.log(`Removed the saved ${name} key.`); }
+    if (!value) return console.log(`${name}: ${keySource(name) || 'no key set'}`);
+    setKey(name, value);
+    return console.log(`Saved your ${name} key (only readable by your user account).`);
+  }
 
   if (cmd === 'config') {
     ensureHome();
@@ -136,7 +155,7 @@ async function main() {
 
   if (cmd === 'build') {
     const [dir, ...taskParts] = pos;
-    const roles = Object.fromEntries(['planner', 'builder', 'reviewer', 'fixer'].filter((r) => typeof flags[r] === 'string').map((r) => [r, flags[r]]));
+    const roles = Object.fromEntries(['researcher', 'planner', 'builder', 'reviewer', 'fixer'].filter((r) => typeof flags[r] === 'string').map((r) => [r, flags[r]]));
     const run = await startBuild({
       dir,
       task: taskParts.join(' '),
@@ -144,6 +163,7 @@ async function main() {
       maxReviewRounds: flags.rounds,
       testCommand: typeof flags.test === 'string' ? flags.test : undefined,
       allowDirty: !!flags['allow-dirty'],
+      research: flags.research !== false,
       newBranch: flags.branch !== false,
     });
     process.on('SIGINT', () => { console.log(c.yellow('\nCancelling...')); run.cancel(); });

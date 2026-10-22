@@ -60,16 +60,64 @@ export const DEFAULT_AGENTS = {
     allowWrite: false,
     enabled: true,
   },
+  perplexity: {
+    label: 'Perplexity',
+    membership: 'Perplexity API (pay-as-you-go; Pro/Max plans do not include API use)',
+    type: 'perplexity',
+    keyName: 'perplexity',
+    endpoint: 'https://api.perplexity.ai/v1/agent',
+    // "low" = fast web-searching model with sources (~$0.05–0.10 per request).
+    // Try "medium" for deeper research at higher cost.
+    request: { preset: 'low' },
+    // Searches the web but can't see your project folder.
+    noFiles: true,
+    install: 'Create an API key at perplexity.ai/account/api and add credit.',
+    login: 'Run `ensemble key perplexity <key>` or click the chip in the dashboard.',
+    allowWrite: false,
+    enabled: true,
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    membership: 'DeepSeek API (pay-as-you-go; there is no DeepSeek membership)',
+    // DeepSeek's own documented setup: Claude Code running on DeepSeek models.
+    // It gets its own settings folder so it never touches your Claude login.
+    command: 'claude',
+    versionArgs: ['--version'],
+    keyName: 'deepseek',
+    unsetEnv: ['ANTHROPIC_API_KEY'],
+    env: {
+      ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+      ANTHROPIC_AUTH_TOKEN: '{key}',
+      // Values from DeepSeek's "Integrate with Claude Code" guide (Oct 2026).
+      // For the bigger model, set ANTHROPIC_MODEL to "deepseek-v4-pro" in your config.
+      ANTHROPIC_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-flash',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash',
+      CLAUDE_CODE_EFFORT_LEVEL: 'max',
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: '786432',
+      CLAUDE_CONFIG_DIR: '{home}/deepseek-claude',
+    },
+    install: 'Needs Claude Code installed (npm install -g @anthropic-ai/claude-code) plus a key from platform.deepseek.com with some credit.',
+    login: 'Run `ensemble key deepseek <key>` or click the chip in the dashboard.',
+    modes: {
+      read: ['-p', '--output-format', 'text'],
+      write: ['-p', '--output-format', 'text', '--permission-mode', 'acceptEdits'],
+    },
+    enabled: true,
+  },
 };
 
 export const DEFAULT_ROLES = {
   // Build workflow
-  planner: ['claude', 'gemini', 'codex'],
-  builder: ['codex', 'claude', 'gemini'],
-  reviewer: ['gemini', 'claude', 'codex'],
-  fixer: ['claude', 'codex', 'gemini'],
+  researcher: ['perplexity'],
+  planner: ['claude', 'gemini', 'codex', 'deepseek'],
+  builder: ['codex', 'claude', 'deepseek', 'gemini'],
+  reviewer: ['gemini', 'deepseek', 'claude', 'codex'],
+  fixer: ['claude', 'codex', 'deepseek', 'gemini'],
   // Council workflow
-  chair: ['claude', 'gemini', 'codex'],
+  chair: ['claude', 'gemini', 'codex', 'deepseek'],
 };
 
 export const DEFAULTS = {
@@ -98,8 +146,9 @@ export function loadConfig() {
     }
   }
   const config = {
-    agents: deepMerge(DEFAULT_AGENTS, user.agents || {}),
-    roles: { ...DEFAULT_ROLES, ...(user.roles || {}) },
+    agents: deepMerge(structuredClone(DEFAULT_AGENTS), user.agents || {}),
+    roles: structuredClone(DEFAULT_ROLES),
+    ...(user.roles ? { roles: { ...structuredClone(DEFAULT_ROLES), ...user.roles } } : {}),
     ...DEFAULTS,
     ...Object.fromEntries(Object.entries(user).filter(([k]) => !['agents', 'roles'].includes(k))),
   };
@@ -112,8 +161,11 @@ export function loadConfig() {
         read: [process.env.ENSEMBLE_MOCK, id, 'read'],
         write: [process.env.ENSEMBLE_MOCK, id, 'write'],
       };
-      a.allowWrite = true;
+      a.allowWrite = id !== 'perplexity';
       delete a.maxArgPrompt;
+      delete a.type;
+      delete a.keyName;
+      delete a.env;
     }
   }
   return config;

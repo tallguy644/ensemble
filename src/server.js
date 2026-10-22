@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { agentStatus, runs, startCouncil, startBuild } from './engine.js';
+import { agentStatus, runs, startCouncil, startBuild, clearStatusCache } from './engine.js';
+import { setKey, removeKey } from './keys.js';
 import { loadConfig, HOME_DIR, ensureHome } from './config.js';
 
 const UI_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui', 'index.html');
@@ -57,6 +58,13 @@ export function createServer({ port, token = crypto.randomBytes(16).toString('he
         const cfg = loadConfig();
         const status = await agentStatus({ refresh: url.searchParams.has('refresh') });
         return send(res, 200, { agents: status, roles: cfg.roles, defaults: { councilRounds: cfg.councilRounds, maxReviewRounds: cfg.maxReviewRounds }, recent: readRecent() });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/keys') {
+        const { name, key, remove } = await readJson(req);
+        if (remove) removeKey(name); else setKey(name, key);
+        clearStatusCache();
+        return send(res, 200, { ok: true });
       }
 
       if (req.method === 'GET' && url.pathname === '/api/runs') {

@@ -13,7 +13,10 @@ process.stdin.on('end', () => {
   if (fail === 'limit') { console.error('Error: You have reached your usage limit. Try again later.'); process.exit(1); }
   if (fail === 'crash') { console.error('boom'); process.exit(2); }
 
-  if (/lead planner/.test(prompt)) {
+  if (/You are the researcher/.test(prompt)) {
+    console.log(`- Use the current stable API. [1]\n\n**Sources**\n- [1] [Docs](https://example.com/docs)`);
+  } else if (/lead planner/.test(prompt)) {
+    if (/WEB RESEARCH/.test(prompt)) fs.writeFileSync('.ensemble/planner-saw-research', '1');
     console.log(`## Summary\nCreate hello.txt.\n## Steps\n1. Write hello.txt\n## Acceptance criteria\n- [ ] hello.txt says hello and is marked fixed\n## Risks\nNone.`);
   } else if (/You are the builder/.test(prompt)) {
     if (mode !== 'write') { console.error('not allowed to write'); process.exit(3); }
