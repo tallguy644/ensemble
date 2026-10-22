@@ -1,0 +1,18 @@
+{
+  "name": "ensemble-ai",
+  "version": "0.1.0",
+  "description": "Make Claude, ChatGPT (Codex) and Gemini work together on projects using the memberships you already pay for, by driving their official CLIs.",
+  "type": "module",
+  "bin": {
+    "ensemble": "bin/ensemble.js"
+  },
+  "scripts": {
+    "start": "node bin/ensemble.js ui",
+    "doctor": "node bin/ensemble.js doctor",
+    "test": "node --test test/workflows.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

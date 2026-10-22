@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ensemble</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1c1b19; --muted: #6d6a63; --line: #e4e1d8;
+  --soft: #efede6; --accent: #1c1b19; --warn: #b26b00; --bad: #b3261e; --good: #1b7f4b;
+  --claude: #d97757; --codex: #10a37f; --gemini: #4285f4;
+  --radius: 14px; --mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #141412; --panel: #1d1c1a; --ink: #eceae4; --muted: #9b978e; --line: #2f2d29; --soft: #252420; --accent: #eceae4; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 'Inter Tight', system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 18px 28px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 19px; letter-spacing: -0.02em; }
+.logo-dots { display: flex; }
+.logo-dots span { width: 14px; height: 14px; border-radius: 50%; margin-right: -4px; border: 2px solid var(--bg); }
+.chips { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.chip { display: flex; align-items: center; gap: 7px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; background: var(--panel); cursor: default; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.chip.ready .dot { background: var(--good); }
+.chip.missing { opacity: .6; }
+.chip.missing .dot { background: var(--bad); }
+button.icon { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; }
+main { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 24px; padding: 24px 28px; max-width: 1500px; margin: 0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 14px 16px; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+.tabs { display: flex; background: var(--soft); border-radius: 10px; padding: 4px; margin-bottom: 18px; }
+.tabs button { flex: 1; border: 0; background: none; padding: 8px; border-radius: 7px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
+.tabs button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.hint { color: var(--muted); font-size: 13.5px; margin: -4px 0 16px; }
+label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; }
+textarea, input[type=text], select { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; }
+textarea { min-height: 130px; resize: vertical; }
+textarea:focus, input:focus, select:focus { outline: 2px solid var(--ink); outline-offset: -1px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.checks { display: flex; gap: 8px; flex-wrap: wrap; }
+.checks label { display: flex; align-items: center; gap: 6px; font-weight: 500; margin: 0; padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; }
+.checks input:disabled + span { opacity: .45; }
+.inline { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.go { margin-top: 20px; width: 100%; padding: 12px; border: 0; border-radius: 10px; background: var(--accent); color: var(--bg); font: inherit; font-weight: 700; cursor: pointer; }
+.go:disabled { opacity: .5; cursor: not-allowed; }
+.err { color: var(--bad); font-size: 13.5px; margin-top: 10px; white-space: pre-wrap; }
+details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; margin-top: 16px; }
+.empty { display: grid; place-items: center; text-align: center; min-height: 340px; color: var(--muted); }
+.empty h2 { color: var(--ink); margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
+.flow { display: flex; gap: 6px; justify-content: center; margin: 18px 0; flex-wrap: wrap; }
+.flow span { padding: 4px 10px; border-radius: 999px; background: var(--soft); font-size: 13px; }
+.runhead { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.runhead h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; flex: 1; }
+.status { font-size: 12.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--soft); white-space: nowrap; }
+.status.done { color: var(--good); } .status.failed, .status.cancelled { color: var(--bad); }
+.phase { margin: 18px 0 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.step { border: 1px solid var(--line); border-left: 4px solid var(--c, var(--muted)); border-radius: 10px; margin: 8px 0; background: var(--bg); }
+.step > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; }
+.step > summary::-webkit-details-marker { display: none; }
+.who { font-weight: 600; } .what { color: var(--muted); }
+.t { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--c); border-radius: 50%; animation: s 0.8s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+.out { margin: 0; padding: 0 12px 12px; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; color: var(--muted); }
+.note { font-size: 13.5px; padding: 7px 12px; border-radius: 8px; margin: 6px 0; background: var(--soft); }
+.note.warn { color: var(--warn); }
+.result { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 6px; }
+.md h1 { font-size: 22px; letter-spacing: -0.02em; } .md h2 { font-size: 17px; margin-top: 22px; }
+.md pre { background: var(--soft); padding: 12px; border-radius: 9px; overflow: auto; font: 12.5px/1.5 var(--mono); }
+.md code { font-family: var(--mono); font-size: 0.9em; background: var(--soft); padding: 1px 5px; border-radius: 5px; }
+.md pre code { background: none; padding: 0; }
+.md table { border-collapse: collapse; } .md td, .md th { border: 1px solid var(--line); padding: 5px 10px; text-align: left; }
+.actions { display: flex; gap: 8px; margin-top: 10px; }
+.actions button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.history { margin-top: 18px; font-size: 13.5px; }
+.history a { display: block; padding: 6px 0; color: var(--ink); text-decoration: none; border-top: 1px solid var(--line); cursor: pointer; }
+.history a small { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><div class="logo-dots"><span style="background:var(--claude)"></span><span style="background:var(--codex)"></span><span style="background:var(--gemini)"></span></div>Ensemble</div>
+  <div class="chips" id="chips"></div>
+  <button class="icon" id="recheck" title="Re-check installed tools">Re-check</button>
+</header>
+<main>
+  <section>
+    <div class="panel">
+      <div class="tabs"><button data-tab="council" class="on">Council</button><button data-tab="build">Build</button></div>
+
+      <form id="council">
+        <p class="hint">Every model answers, reads the others' answers and revises, then one merges the best into a final answer. Good for writing, research and decisions.</p>
+        <label for="q">Question or request</label>
+        <textarea id="q" placeholder="e.g. Compare SQLite, Postgres and Supabase for a small offline-first Android app and recommend one."></textarea>
+        <label>Who's on the council</label>
+        <div class="checks" id="members"></div>
+        <div class="row">
+          <div><label for="rounds">Cross-review rounds</label>
+            <select id="rounds"><option value="1">None (fastest)</option><option value="2" selected>1 round</option><option value="3">2 rounds</option></select></div>
+          <div><label for="chair">Final answer written by</label><select id="chair"></select></div>
+        </div>
+        <button class="go" type="submit">Ask the council</button>
+        <div class="err" id="council-err"></div>
+      </form>
+
+      <form id="build" hidden>
+        <p class="hint">One model plans, another builds, a third reviews, and fixes loop until it's approved. Work lands on a new git branch in your project.</p>
+        <label for="dir">Project folder on this computer</label>
+        <input type="text" id="dir" list="recent" placeholder="C:\Users\you\Projects\my-app" autocomplete="off">
+        <datalist id="recent"></datalist>
+        <label for="task">What should they build or change?</label>
+        <textarea id="task" placeholder="e.g. Add CSV export of shifts with date-range filtering, and tests for it."></textarea>
+        <div class="row">
+          <div><label for="r-planner">Plans</label><select id="r-planner" data-role="planner"></select></div>
+          <div><label for="r-builder">Builds</label><select id="r-builder" data-role="builder" data-write="1"></select></div>
+          <div><label for="r-reviewer">Reviews</label><select id="r-reviewer" data-role="reviewer"></select></div>
+          <div><label for="r-fixer">Fixes</label><select id="r-fixer" data-role="fixer" data-write="1"></select></div>
+        </div>
+        <details class="more"><summary>More options</summary>
+          <label for="test">Test command (optional)</label>
+          <input type="text" id="test" placeholder="npm test">
+          <label for="maxr">Fix rounds after review</label>
+          <select id="maxr"><option value="0">0</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
+          <label class="inline"><input type="checkbox" id="dirty"> Allow uncommitted changes</label>
+        </details>
+        <button class="go" type="submit">Start building</button>
+        <div class="err" id="build-err"></div>
+      </form>
+    </div>
+    <div class="history" id="history"></div>
+  </section>
+
+  <section class="panel" id="view">
+    <div class="empty" id="empty"><div>
+      <h2>Your AIs, working as one team</h2>
+      <p>Uses the Claude, ChatGPT and Gemini plans you already have, through each company's official app.</p>
+      <div class="flow"><span>Plan · Claude</span><span>→</span><span>Build · ChatGPT</span><span>→</span><span>Review · Gemini</span><span>→</span><span>Fix</span></div>
+    </div></div>
+    <div id="run" hidden></div>
+  </section>
+</main>
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const COLORS = { claude: 'var(--claude)', codex: 'var(--codex)', gemini: 'var(--gemini)' };
+let agents = [], roles = {}, current = null, es = null, history = [];
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Small built-in Markdown renderer (works offline).
+function inline(t) {
+  return esc(t)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function md(src) {
+  const lines = src.replace(/\r/g, '').split('\n');
+  let html = '', i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) {
+      const buf = []; i++;
+      while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+      i++; html += `<pre><code>${esc(buf.join('\n'))}</code></pre>`; continue;
+    }
+    const h = l.match(/^(#{1,4})\s+(.*)/);
+    if (h) { html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; i++; continue; }
+    if (/^\s*(---|\*\*\*)\s*$/.test(l)) { html += '<hr>'; i++; continue; }
+    if (/^\|.*\|\s*$/.test(l) && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1] || '')) {
+      const row = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      let t = `<table><tr>${row(l).map((c) => `<th>${inline(c)}</th>`).join('')}</tr>`; i += 2;
+      while (i < lines.length && /^\|/.test(lines[i])) t += `<tr>${row(lines[i++]).map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`;
+      html += t + '</table>'; continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
+      const ordered = /^\s*\d+\./.test(l); let items = '';
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
+        let item = lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, '');
+        item = item.replace(/^\[( |x)\]\s*/i, (m, x) => (x.trim() ? '☑ ' : '☐ '));
+        items += `<li>${inline(item)}</li>`;
+      }
+      html += ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`; continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\s*([-*]|\d+\.)\s+|\|)/.test(lines[i])) para.push(lines[i++]);
+    if (!para.length) para.push(lines[i++]);
+    html += `<p>${para.map(inline).join('<br>')}</p>`;
+  }
+  return html;
+}
+const api = async (path, body) => {
+  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'X-Ensemble-Token': TOKEN, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+};
+
+document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+  $('#council').hidden = b.dataset.tab !== 'council';
+  $('#build').hidden = b.dataset.tab !== 'build';
+});
+
+async function loadAgents(refresh) {
+  const j = await api('/api/agents' + (refresh ? '?refresh=1' : ''));
+  agents = j.agents; roles = j.roles;
+  $('#chips').innerHTML = agents.map((a) => `<div class="chip ${a.status}" title="${esc(a.status === 'ready' ? a.version || '' : `${a.membership}\nInstall: ${a.install}\nSign in: ${a.login}`)}"><span class="dot"></span>${esc(a.label)}</div>`).join('');
+  const ready = agents.filter((a) => a.status === 'ready');
+  $('#members').innerHTML = agents.map((a) => `<label><input type="checkbox" value="${a.id}" ${a.status === 'ready' ? 'checked' : 'disabled'}><span>${esc(a.label)}</span></label>`).join('');
+  $('#chair').innerHTML = ready.map((a) => `<option value="${a.id}" ${roles.chair[0] === a.id ? 'selected' : ''}>${esc(a.label)}</option>`).join('');
+  document.querySelectorAll('select[data-role]').forEach((sel) => {
+    const pool = ready.filter((a) => !sel.dataset.write || a.canWrite);
+    const want = (roles[sel.dataset.role] || []).find((id) => pool.some((a) => a.id === id));
+    sel.innerHTML = pool.map((a) => `<option value="${a.id}" ${a.id === want ? 'selected' : ''}>${esc(a.label)}</option>`).join('') || '<option value="">No ready model</option>';
+  });
+  $('#recent').innerHTML = (j.recent || []).map((d) => `<option value="${esc(d)}">`).join('');
+  if (!ready.length) $('#council-err').textContent = $('#build-err').textContent = 'No AI tools are ready yet. Hover a red chip to see how to install and sign in, then press Re-check.';
+}
+$('#recheck').onclick = () => loadAgents(true).catch(alert);
+
+$('#council').onsubmit = async (e) => {
+  e.preventDefault(); $('#council-err').textContent = '';
+  try {
+    const run = await api('/api/council', {
+      question: $('#q').value,
+      agents: [...document.querySelectorAll('#members input:checked')].map((i) => i.value),
+      rounds: $('#rounds').value, chair: $('#chair').value,
+    });
+    watch(run);
+  } catch (err) { $('#council-err').textContent = err.message; }
+};
+$('#build').onsubmit = async (e) => {
+  e.preventDefault(); $('#build-err').textContent = '';
+  const r = {}; document.querySelectorAll('select[data-role]').forEach((s) => { if (s.value) r[s.dataset.role] = s.value; });
+  try {
+    const run = await api('/api/build', { dir: $('#dir').value, task: $('#task').value, roles: r, testCommand: $('#test').value, maxReviewRounds: $('#maxr').value, allowDirty: $('#dirty').checked });
+    watch(run);
+  } catch (err) { $('#build-err').textContent = err.message; }
+};
+
+function watch(run) {
+  if (es) es.close();
+  current = run;
+  if (!history.find((h) => h.id === run.id)) history.unshift(run);
+  renderHistory();
+  $('#empty').hidden = true;
+  const v = $('#run'); v.hidden = false;
+  v.innerHTML = `<div class="runhead"><h2>${esc(run.title)}</h2><span class="status" id="st">Running</span></div><div id="steps"></div><div class="actions" id="acts"><button id="cancel">Cancel</button></div><div id="result"></div>`;
+  $('#cancel').onclick = () => api(`/api/runs/${run.id}/cancel`, {});
+  const steps = {}, timers = {};
+  es = new EventSource(`/api/runs/${run.id}/events?token=${TOKEN}`);
+  es.onmessage = (m) => {
+    const e = JSON.parse(m.data);
+    const box = $('#steps');
+    if (e.type === 'phase') box.insertAdjacentHTML('beforeend', `<div class="phase">${esc(e.name)}${e.detail ? ` · <span style="text-transform:none;letter-spacing:0;font-weight:500">${esc(e.detail)}</span>` : ''}</div>`);
+    if (e.type === 'note') box.insertAdjacentHTML('beforeend', `<div class="note ${e.level}">${esc(e.text)}</div>`);
+    if (e.type === 'verdict') box.insertAdjacentHTML('beforeend', `<div class="note ${e.verdict === 'approved' ? '' : 'warn'}">${esc(e.by)}: ${e.verdict === 'approved' ? 'Approved ✔' : e.verdict === 'changes' ? 'Changes requested' : 'No clear verdict'}</div>`);
+    if (e.type === 'step-start') {
+      const el = document.createElement('details');
+      el.className = 'step'; el.style.setProperty('--c', COLORS[e.agent] || 'var(--muted)');
+      el.innerHTML = `<summary><span class="spin"></span><span class="who">${esc(e.label)}</span><span class="what">${esc(e.title)}${e.mode === 'write' ? ' · editing files' : ''}</span><span class="t">0s</span></summary><pre class="out"></pre>`;
+      box.appendChild(el); steps[e.stepId] = el;
+      const t0 = e.t; timers[e.stepId] = setInterval(() => { el.querySelector('.t').textContent = `${Math.round((Date.now() - t0) / 1000)}s`; }, 1000);
+    }
+    if (e.type === 'chunk' && steps[e.stepId]) {
+      const out = steps[e.stepId].querySelector('.out');
+      const stick = out.scrollTop + out.clientHeight >= out.scrollHeight - 8;
+      out.textContent += e.text; if (stick) out.scrollTop = out.scrollHeight;
+    }
+    if (e.type === 'step-end' && steps[e.stepId]) {
+      clearInterval(timers[e.stepId]);
+      const el = steps[e.stepId];
+      el.querySelector('.spin').outerHTML = e.ok ? '<span style="color:var(--good)">✔</span>' : '<span style="color:var(--bad)">✘</span>';
+      el.querySelector('.t').textContent = `${Math.round(e.ms / 1000)}s`;
+      if (e.ok && e.output) el.querySelector('.out').textContent = e.output;
+      if (!e.ok) el.querySelector('.what').textContent += ` — ${e.error}`;
+    }
+    if (e.type === 'done' || e.type === 'error') {
+      Object.values(timers).forEach(clearInterval);
+      es.close();
+      const st = $('#st');
+      st.textContent = e.type === 'done' ? 'Done' : (e.status === 'cancelled' ? 'Cancelled' : 'Failed');
+      st.className = `status ${e.type === 'done' ? 'done' : e.status || 'failed'}`;
+      const h = history.find((x) => x.id === run.id); if (h) h.status = e.type === 'done' ? 'done' : e.status;
+      renderHistory();
+      if (e.type === 'done') {
+        $('#result').innerHTML = `<div class="result md">${md(e.result.markdown)}</div>`;
+        $('#acts').innerHTML = `<button id="copy">Copy result</button>`;
+        $('#copy').onclick = () => navigator.clipboard.writeText(e.result.markdown);
+      } else {
+        $('#acts').innerHTML = '';
+        $('#result').innerHTML = `<div class="note warn">${esc(e.message)}</div>`;
+      }
+    }
+  };
+}
+
+function renderHistory() {
+  $('#history').innerHTML = history.length ? `<div class="phase">This session</div>` + history.map((h) =>
+    `<a data-id="${h.id}">${esc(h.title)}<br><small>${h.kind} · ${h.status || 'running'}</small></a>`).join('') : '';
+  document.querySelectorAll('#history a').forEach((a) => a.onclick = () => watch(history.find((h) => h.id === a.dataset.id)));
+}
+
+if (!TOKEN) document.body.innerHTML = '<p style="padding:40px">Open Ensemble using the link printed in the terminal (it includes a security token).</p>';
+else loadAgents().catch((e) => { $('#council-err').textContent = e.message; });
+</script>
+</body>
+</html>

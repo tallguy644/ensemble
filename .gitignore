@@ -1,0 +1,4 @@
+node_modules/
+.ensemble/
+*.log
+.DS_Store
