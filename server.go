@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -145,6 +146,14 @@ func newServerOn(token string, port int, extraIPs []string, remote bool) (*Serve
 	return s, nil
 }
 
+// newServerWithListeners serves on listeners someone else opened (the phone
+// server on the built-in Tailscale device). Host names are added with AllowHost.
+func newServerWithListeners(token string, lns []net.Listener, remote bool) *Server {
+	s := &Server{Token: token, Remote: remote, listeners: lns, hosts: map[string]bool{}}
+	s.http = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	return s
+}
+
 func (s *Server) Serve() error {
 	errs := make(chan error, len(s.listeners))
 	for _, l := range s.listeners {
@@ -247,6 +256,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"recent":     readRecent(),
 			"canPick":    CanPickFolder() && !s.Remote,
 			"remote":     s.Remote,
+			"git":        gitInstalled(),
+			"canInstall": InstallSupported() && !s.Remote,
 			"configPath": ConfigPath(),
 		})
 
@@ -276,25 +287,57 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/api/phone" && !s.Remote:
 		if r.Method == http.MethodPost {
 			var body struct {
-				Enable *bool `json:"enable"`
-				Reset  bool  `json:"reset"`
+				Enable  *bool `json:"enable"`
+				Reset   bool  `json:"reset"`
+				SignOut bool  `json:"signOut"`
 			}
 			if err := readJSON(r, &body); err != nil {
 				sendErr(w, 400, err.Error())
 				return
 			}
-			if body.Reset {
+			switch {
+			case body.SignOut:
+				Phone.SignOut()
+			case body.Reset:
 				Phone.ResetPairing()
+			case body.Enable != nil && *body.Enable:
+				Phone.Enable()
+			case body.Enable != nil:
+				Phone.Disable()
 			}
-			if body.Enable != nil {
-				if *body.Enable {
-					Phone.Enable()
-				} else {
-					Phone.Disable()
-				}
-			}
+		} else if r.URL.Query().Has("refresh") {
+			Phone.Refresh()
 		}
-		sendJSON(w, 200, Phone.Status(r.URL.Query().Has("refresh")))
+		sendJSON(w, 200, Phone.Status())
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/install" && !s.Remote:
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := readJSON(r, &body); err != nil {
+			sendErr(w, 400, err.Error())
+			return
+		}
+		out, err := Install(body.ID)
+		if err != nil {
+			sendJSON(w, 400, map[string]string{"error": err.Error(), "output": out})
+			return
+		}
+		sendJSON(w, 200, map[string]any{"ok": true, "output": out})
+
+	case r.Method == http.MethodPost && r.URL.Path == "/api/signin" && !s.Remote:
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := readJSON(r, &body); err != nil {
+			sendErr(w, 400, err.Error())
+			return
+		}
+		if err := SignIn(body.ID); err != nil {
+			sendErr(w, 400, err.Error())
+			return
+		}
+		sendJSON(w, 200, map[string]bool{"ok": true})
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/pick-folder" && !s.Remote:
 		dir, err := PickFolder()
@@ -406,4 +449,9 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request, run *Run) 
 
 func subtleEqual(a, b string) bool {
 	return len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func gitInstalled() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
 }

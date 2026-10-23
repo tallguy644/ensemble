@@ -10,5 +10,3 @@ require (
 
 require github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 
-// golang.org is not reachable from every network; the official GitHub mirror is identical.
-replace golang.org/x/sys => github.com/golang/sys v0.30.0

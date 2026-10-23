@@ -34,6 +34,10 @@ type Agent struct {
 	NoFiles      bool                `json:"noFiles,omitempty"`
 	Env          map[string]string   `json:"env,omitempty"`
 	UnsetEnv     []string            `json:"unsetEnv,omitempty"`
+	// One-click setup on Windows: the vendor's official installer, and the
+	// command that signs in (opened in a terminal window for you).
+	InstallScript string `json:"installScript,omitempty"`
+	LoginCmd      string `json:"loginCmd,omitempty"`
 }
 
 func (a *Agent) CanWrite() bool  { return a.AllowWrite == nil || *a.AllowWrite }
@@ -63,33 +67,39 @@ var claudeArgs = map[string][]string{
 func defaultAgents() map[string]*Agent {
 	return map[string]*Agent{
 		"claude": {
-			Label:       "Claude",
-			Membership:  "Claude Pro / Max",
-			Command:     "claude",
-			VersionArgs: []string{"--version"},
-			Install:     "PowerShell: irm https://claude.ai/install.ps1 | iex",
-			Login:       "Run `claude` once and choose your Claude Pro/Max account.",
-			Modes:       cloneModes(claudeArgs),
+			Label:         "Claude",
+			Membership:    "Claude Pro / Max",
+			Command:       "claude",
+			VersionArgs:   []string{"--version"},
+			Install:       "PowerShell: irm https://claude.ai/install.ps1 | iex",
+			Login:         "Run `claude` once and choose your Claude Pro/Max account.",
+			Modes:         cloneModes(claudeArgs),
+			InstallScript: "irm https://claude.ai/install.ps1 | iex",
+			LoginCmd:      "claude",
 		},
 		"codex": {
-			Label:       "ChatGPT (Codex)",
-			Membership:  "ChatGPT Plus / Pro",
-			Command:     "codex",
-			VersionArgs: []string{"--version"},
-			Install:     "PowerShell: irm https://chatgpt.com/codex/install.ps1 | iex",
-			Login:       "Run `codex login` and choose \"Sign in with ChatGPT\".",
+			Label:         "ChatGPT (Codex)",
+			Membership:    "ChatGPT Plus / Pro",
+			Command:       "codex",
+			VersionArgs:   []string{"--version"},
+			Install:       "PowerShell: irm https://chatgpt.com/codex/install.ps1 | iex",
+			Login:         "Run `codex login` and choose \"Sign in with ChatGPT\".",
+			InstallScript: "irm https://chatgpt.com/codex/install.ps1 | iex",
+			LoginCmd:      "codex login",
 			Modes: map[string][]string{
 				"read":  {"exec", "--skip-git-repo-check", "-s", "read-only", "-"},
 				"write": {"exec", "--skip-git-repo-check", "-s", "workspace-write", "-"},
 			},
 		},
 		"gemini": {
-			Label:       "Gemini (Antigravity)",
-			Membership:  "Google AI Pro / Ultra",
-			Command:     "agy",
-			VersionArgs: []string{"--version"},
-			Install:     "PowerShell: irm https://antigravity.google/cli/install.ps1 | iex",
-			Login:       "Run `agy` once and sign in with the Google account that has AI Pro.",
+			Label:         "Gemini (Antigravity)",
+			Membership:    "Google AI Pro / Ultra",
+			Command:       "agy",
+			VersionArgs:   []string{"--version"},
+			Install:       "PowerShell: irm https://antigravity.google/cli/install.ps1 | iex",
+			Login:         "Run `agy` once and sign in with the Google account that has AI Pro.",
+			InstallScript: "irm https://antigravity.google/cli/install.ps1 | iex",
+			LoginCmd:      "agy",
 			Modes: map[string][]string{
 				"read": {"-p", "{prompt}", "--print-timeout", "20m"},
 				// agy has no "edits only" mode, so writing means skipping all approvals,
