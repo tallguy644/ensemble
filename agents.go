@@ -400,11 +400,14 @@ type AgentStatus struct {
 	Detail     string `json:"detail,omitempty"`
 	CanWrite   bool   `json:"canWrite"`
 	NoFiles    bool   `json:"noFiles,omitempty"`
+	CanInstall bool   `json:"canInstall,omitempty"` // one-click install available
+	CanSignIn  bool   `json:"canSignIn,omitempty"`
 }
 
 // CheckAgent is the quick health check used by `doctor` and the dashboard.
 func CheckAgent(id string, a *Agent) AgentStatus {
-	s := AgentStatus{ID: id, Label: a.Label, Membership: a.Membership, Install: a.Install, Login: a.Login, KeyName: a.KeyName, NoFiles: a.NoFiles}
+	s := AgentStatus{ID: id, Label: a.Label, Membership: a.Membership, Install: a.Install, Login: a.Login, KeyName: a.KeyName, NoFiles: a.NoFiles,
+		CanInstall: a.InstallScript != "" && InstallSupported(), CanSignIn: a.LoginCmd != "" && InstallSupported()}
 	if !a.IsEnabled() {
 		s.Status = "disabled"
 		return s

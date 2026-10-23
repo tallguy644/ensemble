@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -429,30 +431,205 @@ func TestServerSecurityAndAPI(t *testing.T) {
 	}
 }
 
-// fakeTailscale puts a stand-in `tailscale` program on PATH (Unix only).
-func fakeTailscale(t *testing.T, httpsOK bool) string {
+// fakeNode stands in for the built-in Tailscale device.
+type fakeNode struct {
+	mu        sync.Mutex
+	st        TSState
+	logins    int
+	loggedOut bool
+	closed    bool
+	https     []bool
+}
+
+func (f *fakeNode) set(st TSState) { f.mu.Lock(); f.st = st; f.mu.Unlock() }
+func (f *fakeNode) State(context.Context) (TSState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.st, nil
+}
+func (f *fakeNode) Login(context.Context) error { f.mu.Lock(); f.logins++; f.mu.Unlock(); return nil }
+func (f *fakeNode) Listen(https bool) (net.Listener, error) {
+	f.mu.Lock()
+	f.https = append(f.https, https)
+	f.mu.Unlock()
+	return net.Listen("tcp", "127.0.0.1:0") // plain TCP stands in for both
+}
+func (f *fakeNode) Logout(context.Context) error {
+	f.mu.Lock()
+	f.loggedOut = true
+	f.mu.Unlock()
+	return nil
+}
+func (f *fakeNode) Close() error { f.mu.Lock(); f.closed = true; f.mu.Unlock(); return nil }
+
+func withFakeNode(t *testing.T) *fakeNode {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake tailscale script is Unix-only")
+	f := &fakeNode{st: TSState{BackendState: "Starting"}}
+	oldNew, oldPoll := newTSNode, phonePoll
+	newTSNode = func(dir, host string, logf func(string, ...any)) (tsNode, error) { return f, nil }
+	phonePoll = 30 * time.Millisecond
+	t.Cleanup(func() { Phone.Disable(); newTSNode, phonePoll = oldNew, oldPoll })
+	return f
+}
+
+func waitPhone(t *testing.T, want string) PhoneStatus {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if st := Phone.Status(); st.State == want {
+			return st
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	dir := t.TempDir()
-	certs := `["my-pc.tail1234.ts.net"]`
-	serve := "exit 0"
-	if !httpsOK {
-		certs = `[]`
-		serve = `echo "Serve is not enabled on your tailnet. To enable, visit: https://login.tailscale.com/f/serve?node=abc"; exit 1`
+	t.Fatalf("phone state never became %q: %+v", want, Phone.Status())
+	return PhoneStatus{}
+}
+
+// phoneAddr is where the fake node's listener actually is.
+func phoneAddr(t *testing.T) string {
+	t.Helper()
+	Phone.mu.Lock()
+	defer Phone.mu.Unlock()
+	if Phone.server == nil {
+		t.Fatal("no phone server")
 	}
-	log := filepath.Join(dir, "calls.log")
-	script := fmt.Sprintf(`#!/bin/sh
-echo "$@" >> %s
-case "$1" in
-  status) echo '{"BackendState":"Running","CertDomains":%s,"Self":{"DNSName":"my-pc.tail1234.ts.net.","TailscaleIPs":["127.0.0.2","fd7a:115c:a1e0::1"]}}';;
-  serve) %s;;
-esac
-`, log, certs, serve)
-	os.WriteFile(filepath.Join(dir, "tailscale"), []byte(script), 0o755)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return log
+	return "http://" + Phone.server.listeners[0].Addr().String()
+}
+
+func TestPhoneSignInThenHTTPS(t *testing.T) {
+	f := withFakeNode(t)
+	Phone.Enable()
+	waitPhone(t, "starting")
+
+	// First run: Tailscale needs you to sign in; the link is shown in the app.
+	f.set(TSState{BackendState: "NeedsLogin", AuthURL: "https://login.tailscale.com/a/abc123"})
+	if st := waitPhone(t, "needs-login"); st.AuthURL != "https://login.tailscale.com/a/abc123" || st.URL != "" {
+		t.Fatalf("%+v", st)
+	}
+
+	// Signed in, HTTPS on: phone link is https://ensemble.<tailnet>.ts.net
+	f.set(TSState{BackendState: "Running", DNSName: "ensemble.tail1234.ts.net", IPv4: "100.64.0.9", Tailnet: "me@example.com", HTTPS: true})
+	st := waitPhone(t, "running")
+	if st.Mode != "https" || !strings.HasPrefix(st.URL, "https://ensemble.tail1234.ts.net/?token=") || !strings.HasPrefix(st.QR, "data:image/png") || st.Tailnet != "me@example.com" {
+		t.Fatalf("%+v", st)
+	}
+	base, tok := phoneAddr(t), loadPhone().Token
+	if code, body := phoneGet(t, base+"/api/agents", "ensemble.tail1234.ts.net", tok); code != 200 || !strings.Contains(body, `"remote":true`) {
+		t.Fatalf("agents: %d %s", code, body)
+	}
+	if code, body := phoneGet(t, base+"/api/agents", "ensemble.tail1234.ts.net", "wrong"); code != 401 || !strings.Contains(body, "Scan the QR code") {
+		t.Fatalf("wrong key: %d %s", code, body)
+	}
+	if code, _ := phoneGet(t, base+"/api/agents", "evil.example", tok); code != 403 {
+		t.Fatalf("bad host: %d", code)
+	}
+	if code, _ := phoneGet(t, base+"/api/phone", "ensemble.tail1234.ts.net", tok); code != 404 {
+		t.Fatalf("pairing settings reachable from the phone: %d", code)
+	}
+	for _, p := range []string{"/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png"} {
+		if code, _ := phoneGet(t, base+p, "ensemble.tail1234.ts.net", ""); code != 200 {
+			t.Fatalf("%s: %d", p, code)
+		}
+	}
+
+	// Unpair: old key stops working, new key works.
+	Phone.ResetPairing()
+	st = waitPhone(t, "running")
+	base2 := phoneAddr(t)
+	if code, _ := phoneGet(t, base2+"/api/agents", "ensemble.tail1234.ts.net", tok); code != 401 {
+		t.Fatalf("old key still works: %d", code)
+	}
+	if code, _ := phoneGet(t, base2+"/api/agents", "ensemble.tail1234.ts.net", loadPhone().Token); code != 200 || !strings.Contains(st.URL, loadPhone().Token) {
+		t.Fatalf("new key rejected: %d", code)
+	}
+
+	// Sign out: disconnects the device and turns phone access off.
+	Phone.SignOut()
+	f.mu.Lock()
+	out, closed := f.loggedOut, f.closed
+	f.mu.Unlock()
+	if !out || Phone.Status().State != "off" || loadPhone().Enabled {
+		t.Fatalf("sign out: loggedOut=%v status=%+v", out, Phone.Status())
+	}
+	time.Sleep(50 * time.Millisecond)
+	f.mu.Lock()
+	closed = f.closed
+	f.mu.Unlock()
+	if !closed {
+		t.Fatal("node not closed")
+	}
+}
+
+func TestPhoneHTTPUntilHTTPSTurnedOn(t *testing.T) {
+	f := withFakeNode(t)
+	f.set(TSState{BackendState: "Running", DNSName: "ensemble.tail1234.ts.net", IPv4: "100.64.0.9"})
+	Phone.Enable()
+	st := waitPhone(t, "running")
+	if st.Mode != "http" || !strings.HasPrefix(st.URL, "http://ensemble.tail1234.ts.net/?token=") || !strings.Contains(st.FixURL, "admin/dns") {
+		t.Fatalf("%+v", st)
+	}
+	// Turning HTTPS on in Tailscale switches over automatically.
+	f.set(TSState{BackendState: "Running", DNSName: "ensemble.tail1234.ts.net", IPv4: "100.64.0.9", HTTPS: true})
+	deadline := time.Now().Add(3 * time.Second)
+	for Phone.Status().Mode != "https" && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st := Phone.Status(); st.Mode != "https" || st.Problem != "" {
+		t.Fatalf("%+v", st)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.https) < 2 || f.https[0] || !f.https[len(f.https)-1] {
+		t.Fatalf("listen calls %v", f.https)
+	}
+}
+
+func TestPhoneAsksForLoginLink(t *testing.T) {
+	f := withFakeNode(t)
+	f.set(TSState{BackendState: "NeedsLogin"})
+	Phone.Enable()
+	waitPhone(t, "needs-login")
+	time.Sleep(100 * time.Millisecond)
+	f.mu.Lock()
+	n := f.logins
+	f.mu.Unlock()
+	if n == 0 {
+		t.Fatal("never asked Tailscale for a sign-in link")
+	}
+	// A link that only shows up in Tailscale's log is used too.
+	Phone.tsLog()("To start this tsnet server, restart with TS_AUTHKEY set, or go to: https://login.tailscale.com/a/fromlog9")
+	deadline := time.Now().Add(2 * time.Second)
+	for Phone.Status().AuthURL == "" && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if Phone.Status().AuthURL != "https://login.tailscale.com/a/fromlog9" {
+		t.Fatalf("%+v", Phone.Status())
+	}
+}
+
+func TestPhoneResumesOnStartup(t *testing.T) {
+	f := withFakeNode(t)
+	f.set(TSState{BackendState: "Running", DNSName: "ensemble.tail1234.ts.net", HTTPS: true})
+	savePhone(phoneSettings{Enabled: true, Token: "persisted-token-1234567890"})
+	Phone.Start()
+	st := waitPhone(t, "running")
+	if !strings.HasSuffix(st.URL, "token=persisted-token-1234567890") {
+		t.Fatalf("pairing key not kept across restarts: %s", st.URL)
+	}
+}
+
+func TestStreamResumesFromOffset(t *testing.T) {
+	s, _ := NewServer(0)
+	go s.Serve()
+	defer s.Close()
+	r, _ := StartCouncil(CouncilRequest{Question: "hi", Agents: []string{"claude"}, Rounds: 1})
+	waitRun(t, r)
+	total := len(r.EventsFrom(0))
+	_, all := phoneGet(t, fmt.Sprintf("http://127.0.0.1:%d/api/runs/%s/events?token=%s", s.Port, r.ID, s.Token), "", "")
+	_, tail := phoneGet(t, fmt.Sprintf("http://127.0.0.1:%d/api/runs/%s/events?token=%s&from=%d", s.Port, r.ID, s.Token, total-1), "", "")
+	if strings.Count(all, "data: ") != total+1 || strings.Count(tail, "data: ") != 2 || !strings.Contains(tail, `"type":"done"`) {
+		t.Fatalf("all=%d tail=%q", strings.Count(all, "data: "), tail)
+	}
 }
 
 func phoneGet(t *testing.T, url, host, tok string) (int, string) {
@@ -471,95 +648,4 @@ func phoneGet(t *testing.T, url, host, tok string) (int, string) {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
-}
-
-func TestPhoneAccessHTTPS(t *testing.T) {
-	calls := fakeTailscale(t, true)
-	defer Phone.Disable()
-	Phone.Enable()
-	st := Phone.Status(false)
-	if st.Mode != "https" || !strings.HasPrefix(st.URL, "https://my-pc.tail1234.ts.net:8443/?token=") || !strings.HasPrefix(st.QR, "data:image/png;base64,") {
-		t.Fatalf("status %+v", st)
-	}
-	b, _ := os.ReadFile(calls)
-	if !strings.Contains(string(b), "serve --bg --https=8443 http://127.0.0.1:4318") {
-		t.Fatalf("serve not configured: %s", b)
-	}
-	tok := loadPhone().Token
-	base := "http://127.0.0.1:4318"
-	// Requests forwarded by Tailscale Serve carry the tailnet name.
-	if code, body := phoneGet(t, base+"/api/agents", "my-pc.tail1234.ts.net:8443", tok); code != 200 || !strings.Contains(body, `"remote":true`) || !strings.Contains(body, `"canPick":false`) {
-		t.Fatalf("agents via tailnet name: %d %s", code, body)
-	}
-	if code, body := phoneGet(t, base+"/api/agents", "", "wrong"); code != 401 || !strings.Contains(body, "Scan the QR code") {
-		t.Fatalf("wrong token: %d %s", code, body)
-	}
-	if code, _ := phoneGet(t, base+"/api/agents", "evil.example:8443", tok); code != 403 {
-		t.Fatalf("bad host: %d", code)
-	}
-	// The phone can't open pairing settings or the PC's folder picker.
-	if code, _ := phoneGet(t, base+"/api/phone", "", tok); code != 404 {
-		t.Fatalf("phone settings reachable from phone: %d", code)
-	}
-	// App files load without the token, so "Add to Home screen" works.
-	for _, p := range []string{"/manifest.webmanifest", "/sw.js", "/icon-192.png", "/icon-512.png"} {
-		if code, _ := phoneGet(t, base+p, "my-pc.tail1234.ts.net:8443", ""); code != 200 {
-			t.Fatalf("%s: %d", p, code)
-		}
-	}
-	// Unpairing makes the old token stop working.
-	Phone.ResetPairing()
-	if code, _ := phoneGet(t, base+"/api/agents", "", tok); code != 401 {
-		t.Fatalf("old token still works after reset: %d", code)
-	}
-	if code, _ := phoneGet(t, base+"/api/agents", "", loadPhone().Token); code != 200 {
-		t.Fatalf("new token rejected: %d", code)
-	}
-	Phone.Disable()
-	if _, err := http.Get(base + "/"); err == nil {
-		t.Fatal("phone server still running after disable")
-	}
-	if loadPhone().Enabled {
-		t.Fatal("still marked enabled")
-	}
-}
-
-func TestPhoneAccessHTTPFallback(t *testing.T) {
-	fakeTailscale(t, false)
-	defer Phone.Disable()
-	Phone.Enable()
-	st := Phone.Status(false)
-	if st.Mode != "http" || !strings.HasPrefix(st.URL, "http://127.0.0.2:4318/?token=") {
-		t.Fatalf("status %+v", st)
-	}
-	if !strings.Contains(st.FixURL, "login.tailscale.com/f/serve") || st.Problem == "" {
-		t.Fatalf("expected HTTPS-enable link: %+v", st)
-	}
-	if code, _ := phoneGet(t, "http://127.0.0.2:4318/api/agents", "", loadPhone().Token); code != 200 {
-		t.Fatalf("direct tailscale-IP access: %d", code)
-	}
-}
-
-func TestPhoneWithoutTailscale(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	defer Phone.Disable()
-	Phone.Enable()
-	st := Phone.Status(true)
-	if st.Serving || st.URL != "" || !strings.Contains(st.Problem, "Install Tailscale") {
-		t.Fatalf("%+v", st)
-	}
-}
-
-func TestStreamResumesFromOffset(t *testing.T) {
-	s, _ := NewServer(0)
-	go s.Serve()
-	defer s.Close()
-	r, _ := StartCouncil(CouncilRequest{Question: "hi", Agents: []string{"claude"}, Rounds: 1})
-	waitRun(t, r)
-	total := len(r.EventsFrom(0))
-	_, all := phoneGet(t, fmt.Sprintf("http://127.0.0.1:%d/api/runs/%s/events?token=%s", s.Port, r.ID, s.Token), "", "")
-	_, tail := phoneGet(t, fmt.Sprintf("http://127.0.0.1:%d/api/runs/%s/events?token=%s&from=%d", s.Port, r.ID, s.Token, total-1), "", "")
-	if strings.Count(all, "data: ") != total+1 || strings.Count(tail, "data: ") != 2 || !strings.Contains(tail, `"type":"done"`) {
-		t.Fatalf("all=%d tail=%q", strings.Count(all, "data: "), tail)
-	}
 }

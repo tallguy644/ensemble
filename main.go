@@ -15,7 +15,7 @@ import (
 // guiBuild is set to "1" for Ensemble.exe (the double-click app) at build time.
 var guiBuild = ""
 
-var version = "0.4.0"
+var version = "0.5.0"
 
 const helpText = `Ensemble: Claude, ChatGPT (Codex), Gemini, Perplexity and DeepSeek working together.
 Claude, ChatGPT and Gemini run on the memberships you already pay for; Perplexity

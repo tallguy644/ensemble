@@ -3,3 +3,5 @@ dist/
 *.test
 *.log
 .DS_Store
+go.local.mod
+go.local.sum

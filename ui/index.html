@@ -170,6 +170,7 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
 
       <form id="build" hidden>
         <p class="hint">One model plans, another builds, a third reviews, and fixes loop until it's approved. Work lands on a new git branch in your project.</p>
+        <div id="git-missing" class="warnbox" hidden>Build needs <b>git</b> (free), which isn't installed. <button type="button" class="icon" id="git-install" style="color:var(--ink);margin-left:6px">Install git</button> <span id="git-status"></span></div>
         <label for="dir" id="dir-label">Project folder on this computer</label>
         <div class="dirrow"><input type="text" id="dir" list="recent" placeholder="C:\Users\you\Projects\my-app" autocomplete="off"><button type="button" id="browse" hidden>Browse…</button></div>
         <datalist id="recent"></datalist>
@@ -208,34 +209,42 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 13.5px; 
 <dialog id="setupdlg"><form method="dialog">
   <h3 id="setup-title">Set up</h3>
   <p id="setup-sub"></p>
-  <div class="setup-step"><b>1. Install</b><div class="cmdline"><code id="setup-install"></code><button type="button" data-copy="setup-install">Copy</button></div></div>
-  <div class="setup-step"><b>2. Sign in</b><p id="setup-login" style="margin:0;color:var(--ink)"></p></div>
-  <p style="margin-top:14px">Paste the install line into <b>PowerShell</b> (Start menu → type “PowerShell”), then come back and press Re-check.</p>
+  <div class="setup-step"><b>1. Install</b>
+    <div id="setup-oneclick"><button type="button" class="go" id="setup-install-btn" style="width:auto;margin:0;padding:8px 16px">Install for me</button> <span id="setup-install-status" class="hint" style="margin:0 0 0 8px"></span></div>
+    <details id="setup-manual" class="more" style="margin-top:6px"><summary>Or install it yourself</summary>
+      <p style="margin:8px 0 6px">Paste this into <b>PowerShell</b> (Start menu → type “PowerShell”):</p>
+      <div class="cmdline"><code id="setup-install"></code><button type="button" data-copy="setup-install">Copy</button></div>
+    </details>
+  </div>
+  <div class="setup-step"><b>2. Sign in</b>
+    <p id="setup-login" style="margin:0 0 6px;color:var(--ink)"></p>
+    <button type="button" id="setup-signin-btn" class="icon" style="color:var(--ink)">Open sign-in window</button>
+  </div>
+  <pre id="setup-output" class="out" style="padding:8px 0 0" hidden></pre>
   <div class="btns"><button value="close">Close</button><button class="primary" value="recheck" id="setup-recheck">Re-check</button></div>
 </form></dialog>
 <dialog id="phonedlg"><form method="dialog">
   <h3>Use Ensemble from your phone</h3>
-  <p>Your phone becomes a remote for this PC: the AIs still run here, and you start and watch runs from anywhere. It goes over <b>Tailscale</b>, a free private network between your own devices, so nothing is opened to the internet.</p>
-  <div class="toggle"><div><b>Phone access</b><br><span class="pill off" id="ph-state">Off</span></div><button type="button" class="go" id="ph-toggle" style="width:auto;margin:0;padding:8px 16px">Turn on</button></div>
+  <p>Your phone becomes a remote for this PC: the AIs still run here, and you start and watch runs from anywhere. Tailscale is built into Ensemble, so this PC needs nothing else. Nothing is opened to the internet.</p>
+  <div class="toggle"><div><b>Phone access</b><br><span class="pill off" id="ph-state">Off</span> <span class="hint" id="ph-tailnet" style="margin:0"></span></div><button type="button" class="go" id="ph-toggle" style="width:auto;margin:0;padding:8px 16px">Turn on</button></div>
+  <div id="ph-login" hidden>
+    <p style="color:var(--ink)"><b>Sign in to Tailscale</b> to link Ensemble to your private network. It's free; you can sign in with Google, Microsoft, Apple or GitHub. Use the same account you'll use on your phone.</p>
+    <a id="ph-login-btn" class="go" style="display:inline-block;width:auto;text-decoration:none;margin:0;padding:9px 16px" href="#" target="_blank" rel="noopener">Sign in to Tailscale</a>
+    <p style="margin-top:10px">This window updates by itself once you've signed in.</p>
+  </div>
+  <p id="ph-starting" hidden>Starting Tailscale…</p>
   <div id="ph-problem" class="warnbox" hidden></div>
-  <a id="ph-fix" class="linkbtn" href="#" hidden>Open Tailscale settings →</a>
+  <a id="ph-fix" class="linkbtn" href="#" target="_blank" rel="noopener" hidden>Open Tailscale settings →</a>
   <div id="ph-pair" hidden>
     <div class="qrbox"><img id="ph-qr" alt="QR code to open Ensemble on your phone"></div>
     <ol class="steps-list">
-      <li>Install <b>Tailscale</b> on your phone and sign in with the same account as this PC.</li>
+      <li>On your phone, install the <b>Tailscale</b> app and sign in with the same account.</li>
       <li>Scan this code with your phone's camera and open the link.</li>
       <li id="ph-install-step">In Chrome's ⋮ menu, tap <b>Add to Home screen</b> → <b>Install</b>.</li>
     </ol>
     <p style="margin:8px 0 0">Ensemble must be open on this PC (minimized is fine) and the PC awake for your phone to reach it.</p>
   </div>
-  <div id="ph-setup" hidden>
-    <ol class="steps-list">
-      <li>Install <a href="https://tailscale.com/download" target="_blank" rel="noopener">Tailscale</a> on this PC and on your phone (both free).</li>
-      <li>Sign in to the same account on both.</li>
-      <li>Press <b>Re-check</b>.</li>
-    </ol>
-  </div>
-  <div class="btns"><button type="button" id="ph-reset" hidden>Unpair all phones</button><button type="button" id="ph-recheck">Re-check</button><button class="primary" value="close">Done</button></div>
+  <div class="btns"><button type="button" id="ph-signout" hidden>Sign out</button><button type="button" id="ph-reset" hidden>Unpair phones</button><button class="primary" value="close">Done</button></div>
 </form></dialog>
 <dialog id="keydlg"><form method="dialog" id="keyform">
   <h3 id="key-title">Add API key</h3>
@@ -354,19 +363,60 @@ async function loadAgents(refresh) {
   $('#recent').innerHTML = (j.recent || []).map((d) => `<option value="${esc(d)}">`).join('');
   $('#browse').hidden = !j.canPick;
   REMOTE = !!j.remote;
+  $('#git-missing').hidden = j.git !== false;
+  $('#git-install').hidden = !j.canInstall;
+  if (!j.canInstall && j.git === false) $('#git-status').textContent = REMOTE ? 'Install it on your PC from git-scm.com.' : 'Get it from git-scm.com.';
   $('#phonebtn').hidden = REMOTE;
   $('#dir-label').textContent = REMOTE ? 'Project folder on your PC' : 'Project folder on this computer';
   if (!ready.length) $('#council-err').textContent = $('#build-err').textContent = 'No AIs are ready yet. Click a red or yellow chip at the top to set it up.';
 }
 $('#recheck').onclick = () => loadAgents(true).catch(alert);
 
+$('#git-install').onclick = () => runInstall('git', $('#git-status'), null, $('#git-install'));
+let setupAgent = null;
 function openSetup(a) {
+  setupAgent = a;
   $('#setup-title').textContent = `Set up ${a.label}`;
   $('#setup-sub').textContent = `Uses your ${a.membership} membership.${a.detail && a.detail !== 'not installed' ? ` Last check said: ${a.detail}` : ''}`;
   $('#setup-install').textContent = (a.install || '').replace(/^PowerShell:\s*/, '');
-  $('#setup-login').textContent = a.login || '';
+  $('#setup-login').textContent = a.canSignIn ? 'After installing, open the sign-in window and follow the steps there (it opens your browser). Then close it and press Re-check.' : (a.login || '');
+  $('#setup-oneclick').hidden = !a.canInstall;
+  $('#setup-manual').open = !a.canInstall;
+  $('#setup-signin-btn').hidden = !a.canSignIn;
+  $('#setup-install-status').textContent = '';
+  $('#setup-output').hidden = true;
+  $('#setup-install-btn').disabled = false;
   $('#setupdlg').showModal();
 }
+async function runInstall(id, statusEl, outputEl, btn) {
+  btn.disabled = true;
+  statusEl.textContent = 'Installing… this can take a minute or two.';
+  try {
+    const r = await fetch('/api/install', { method: 'POST', headers: { 'X-Ensemble-Token': TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    const j = await r.json().catch(() => ({}));
+    if (outputEl) { outputEl.textContent = j.output || ''; outputEl.hidden = !j.output; }
+    if (!r.ok) throw new Error(j.error || 'Install failed');
+    statusEl.textContent = 'Installed ✔';
+    await loadAgents(true);
+    return true;
+  } catch (e) {
+    statusEl.textContent = e.message + ' You can install it yourself instead (below).';
+    if (outputEl === $('#setup-output')) $('#setup-manual').open = true;
+    btn.disabled = false;
+    return false;
+  }
+}
+$('#setup-install-btn').onclick = async () => {
+  const ok = await runInstall(setupAgent.id, $('#setup-install-status'), $('#setup-output'), $('#setup-install-btn'));
+  if (ok) {
+    const a = agents.find((x) => x.id === setupAgent.id);
+    $('#setup-install-status').textContent = a && a.status === 'ready' ? 'Installed ✔ Now sign in.' : 'Installed ✔ Now sign in, then press Re-check.';
+  }
+};
+$('#setup-signin-btn').onclick = async () => {
+  try { await api('/api/signin', { id: setupAgent.id }); $('#setup-install-status').textContent = 'A sign-in window opened. Finish there, close it, then press Re-check.'; }
+  catch (e) { $('#setup-install-status').textContent = e.message; }
+};
 document.querySelectorAll('[data-copy]').forEach((b) => b.onclick = () => {
   navigator.clipboard.writeText($('#' + b.dataset.copy).textContent);
   b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy'; }, 1500);
@@ -383,35 +433,51 @@ document.addEventListener('click', (e) => {
 });
 setInterval(() => { fetch('/api/ping', { headers: { 'X-Ensemble-Token': TOKEN } }).catch(() => {}); }, 30000);
 
+let phonePoll = null;
 async function loadPhone(refresh, change) {
   const j = change ? await api('/api/phone', change) : await api('/api/phone' + (refresh ? '?refresh=1' : ''));
-  const on = j.enabled && j.url;
-  $('#ph-state').textContent = j.enabled ? (on ? (j.mode === 'https' ? 'On · HTTPS' : 'On · HTTP') : 'On · waiting for Tailscale') : 'Off';
-  $('#ph-state').className = `pill ${on ? 'on' : 'off'}`;
+  const labels = { off: 'Off', starting: 'Starting…', 'needs-login': 'Waiting for sign-in', running: j.mode === 'https' ? 'On · HTTPS' : 'On · HTTP', error: 'Problem' };
+  $('#ph-state').textContent = labels[j.state] || j.state;
+  $('#ph-state').className = `pill ${j.state === 'running' ? 'on' : 'off'}`;
+  $('#ph-tailnet').textContent = j.tailnet && j.state === 'running' ? `· ${j.tailnet}` : '';
   $('#ph-toggle').textContent = j.enabled ? 'Turn off' : 'Turn on';
   $('#ph-toggle').dataset.on = j.enabled ? '1' : '';
+  $('#ph-starting').hidden = j.state !== 'starting';
+  $('#ph-login').hidden = j.state !== 'needs-login';
+  $('#ph-login-btn').href = j.authUrl || '#';
+  $('#ph-login-btn').style.opacity = j.authUrl ? '1' : '.5';
+  $('#ph-login-btn').textContent = j.authUrl ? 'Sign in to Tailscale' : 'Getting the sign-in link…';
   $('#ph-problem').hidden = !j.problem; $('#ph-problem').textContent = j.problem || '';
   $('#ph-fix').hidden = !j.fixUrl; $('#ph-fix').href = j.fixUrl || '#';
-  $('#ph-fix').textContent = /download/.test(j.fixUrl || '') ? 'Download Tailscale →' : 'Open Tailscale settings →';
-  $('#ph-pair').hidden = !on;
-  $('#ph-reset').hidden = !j.enabled;
-  $('#ph-setup').hidden = !(j.enabled && !j.tailscale.running);
-  if (on) $('#ph-qr').src = j.qr;
+  $('#ph-fix').textContent = /admin\/dns/.test(j.fixUrl || '') ? 'Turn on HTTPS in Tailscale →' : 'Open Tailscale settings →';
+  $('#ph-pair').hidden = j.state !== 'running';
+  $('#ph-reset').hidden = j.state !== 'running';
+  $('#ph-signout').hidden = !(j.enabled && (j.state === 'running' || j.state === 'error'));
+  if (j.state === 'running' && j.qr) $('#ph-qr').src = j.qr;
   $('#ph-install-step').innerHTML = j.mode === 'https'
     ? 'In Chrome\'s ⋮ menu, tap <b>Add to Home screen</b> → <b>Install</b>. It opens full-screen like an app.'
-    : 'In Chrome\'s ⋮ menu, tap <b>Add to Home screen</b> for a shortcut (turn on Tailscale HTTPS above for a full app).';
+    : 'In Chrome\'s ⋮ menu, tap <b>Add to Home screen</b> for a shortcut (turn on HTTPS above for a full-screen app).';
+  return j;
 }
-$('#phonebtn').onclick = () => { $('#phonedlg').showModal(); loadPhone(true).catch((e) => { $('#ph-problem').hidden = false; $('#ph-problem').textContent = e.message; }); };
+function phoneError(e) { $('#ph-problem').hidden = false; $('#ph-problem').textContent = e.message; }
+$('#phonebtn').onclick = () => {
+  $('#phonedlg').showModal();
+  loadPhone(true).catch(phoneError);
+  clearInterval(phonePoll);
+  phonePoll = setInterval(() => { if ($('#phonedlg').open) loadPhone(false).catch(() => {}); else clearInterval(phonePoll); }, 2000);
+};
 $('#ph-toggle').onclick = async () => {
   $('#ph-toggle').disabled = true;
-  try { await loadPhone(false, { enable: !$('#ph-toggle').dataset.on }); }
-  catch (e) { $('#ph-problem').hidden = false; $('#ph-problem').textContent = e.message; }
+  try { await loadPhone(false, { enable: !$('#ph-toggle').dataset.on }); } catch (e) { phoneError(e); }
   $('#ph-toggle').disabled = false;
 };
-$('#ph-recheck').onclick = () => loadPhone(true).catch(() => {});
 $('#ph-reset').onclick = async () => {
   if (!confirm('Unpair all phones? Each one will need to scan the new QR code.')) return;
-  await loadPhone(false, { reset: true });
+  await loadPhone(false, { reset: true }).catch(phoneError);
+};
+$('#ph-signout').onclick = async () => {
+  if (!confirm('Sign Ensemble out of Tailscale? Phones will lose access until you turn phone access on and sign in again.')) return;
+  await loadPhone(false, { signOut: true }).catch(phoneError);
 };
 
 // Runs started on any device (PC or phone) show up everywhere.
